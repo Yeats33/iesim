@@ -14,3 +14,4 @@ export 'src/model/subscription.dart';
 export 'src/model/activity_record.dart';
 export 'src/result.dart';
 export 'src/store/database.dart';
+export 'src/store/subscription_repository.dart';

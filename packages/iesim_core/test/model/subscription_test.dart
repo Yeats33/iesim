@@ -82,5 +82,10 @@ void main() {
         isNot(equals(base())),
       );
     });
+
+    test('空 id 与空 timeZoneId 抛出 ArgumentError', () {
+      expect(() => base().copyWith(id: ''), throwsArgumentError);
+      expect(() => base().copyWith(timeZoneId: ''), throwsArgumentError);
+    });
   });
 }

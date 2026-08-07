@@ -63,5 +63,26 @@ void main() {
       expect(make(), equals(make()));
       expect(make().copyWith(id: 'act-6'), isNot(equals(make())));
     });
+
+    test('空 id 与空 subscriptionId 抛出 ArgumentError', () {
+      expect(
+        () => ActivityRecord(
+          id: '',
+          subscriptionId: 'sub-1',
+          type: ActivityType.call,
+          occurredAt: DateTime.utc(2026, 8, 7, 5, 0),
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => ActivityRecord(
+          id: 'act-x',
+          subscriptionId: '',
+          type: ActivityType.call,
+          occurredAt: DateTime.utc(2026, 8, 7, 5, 0),
+        ),
+        throwsArgumentError,
+      );
+    });
   });
 }

@@ -41,7 +41,7 @@ class ActivityRecordRepository {
     try {
       final rows = _db.select(
         'SELECT * FROM activity_records WHERE subscription_id = ? '
-        'ORDER BY occurred_at ASC',
+        'ORDER BY occurred_at ASC, id ASC',
         [subscriptionId],
       );
       return Ok([for (final row in rows) _rowToRecord(row)]);
@@ -56,7 +56,7 @@ class ActivityRecordRepository {
   Result<List<ActivityRecord>> listAll() {
     try {
       final rows = _db.select(
-        'SELECT * FROM activity_records ORDER BY occurred_at ASC',
+        'SELECT * FROM activity_records ORDER BY occurred_at ASC, id ASC',
       );
       return Ok([for (final row in rows) _rowToRecord(row)]);
     } on SqliteException catch (e) {

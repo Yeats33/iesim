@@ -256,7 +256,7 @@ import 'package:iesim_core/src/value/money.dart';
 void main() {
   group('Plan', () {
     test('默认构造为可空全空、非长期', () {
-      const plan = Plan();
+      final plan = Plan();
       expect(plan.name, isNull);
       expect(plan.cyclePrice, isNull);
       expect(plan.cycleDays, isNull);
@@ -282,7 +282,7 @@ void main() {
     });
 
     test('copyWith 仅覆盖指定字段', () {
-      const plan = Plan(name: 'A', cycleDays: 30);
+      final plan = Plan(name: 'A', cycleDays: 30);
       final next = plan.copyWith(cyclePrice: Money.zero('CNY'));
       expect(next.name, equals('A'));
       expect(next.cycleDays, equals(30));
@@ -291,12 +291,12 @@ void main() {
 
     test('相同字段视为相等', () {
       expect(
-        const Plan(name: 'A', cycleDays: 30),
-        equals(const Plan(name: 'A', cycleDays: 30)),
+        Plan(name: 'A', cycleDays: 30),
+        equals(Plan(name: 'A', cycleDays: 30)),
       );
       expect(
-        const Plan(name: 'A', cycleDays: 30),
-        isNot(equals(const Plan(name: 'A', cycleDays: 60))),
+        Plan(name: 'A', cycleDays: 30),
+        isNot(equals(Plan(name: 'A', cycleDays: 60))),
       );
     });
   });
@@ -342,7 +342,7 @@ class Plan {
   /// 长期套餐（与「是否需保号」无关，见 KeepAlive.required）。
   final bool isLongTerm;
 
-  const Plan({
+  Plan({
     this.name,
     this.cyclePrice,
     this.cycleDays,
@@ -396,7 +396,7 @@ class Plan {
 }
 ```
 
-注意：const 构造允许在构造体中 throw，与 KeepAlive 的校验模式一致。
+注意：Dart 禁止 const 构造函数带构造体（`const_constructor_with_body` 编译错误），因此 `Plan` 为非 const 构造，校验在构造体中 throw `ArgumentError`——与 KeepAlive 的校验模式一致（实测 2026-08-08 修正，原计划误写 const）。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -579,7 +579,7 @@ void main() {
         iccid: '89000000000000000001',
         number: PhoneNumber('+8613800000000'),
         operator: '中国移动',
-        plan: const Plan(name: '畅享 5G', cycleDays: 30),
+        plan: Plan(name: '畅享 5G', cycleDays: 30),
         keepAlive: KeepAlive.notRequired(),
         tags: const ['主力号'],
         appearance: const Appearance(flag: '🇨🇳'),
@@ -608,7 +608,7 @@ void main() {
       final s = Subscription(
         id: 'sub-2',
         number: PhoneNumber('+8613800000000'),
-        plan: const Plan(name: '畅享 5G', cycleDays: 30),
+        plan: Plan(name: '畅享 5G', cycleDays: 30),
         keepAlive: KeepAlive.notRequired(),
         tags: const ['主力号'],
         timeZoneId: 'Asia/Shanghai',
@@ -1795,7 +1795,7 @@ void main() {
     subs.upsert(Subscription(
       id: id,
       number: PhoneNumber('13800000000'),
-      plan: const Plan(),
+      plan: Plan(),
       keepAlive: KeepAlive.notRequired(),
       timeZoneId: 'Asia/Shanghai',
       createdAt: DateTime.utc(2026, 8, 1),

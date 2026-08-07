@@ -2,3 +2,4 @@
 library;
 
 export 'src/value/money.dart';
+export 'src/time/clock.dart';

@@ -89,7 +89,7 @@ iesim/packages/iesim_core/
 - Consumes: 无
 - Produces: `class PhoneNumber`，构造 `PhoneNumber(String number)` 自动规范化（去空格/连字符/括号，仅允许数字、`+` 前缀与 `#*`），规范化结果非法时抛 `ArgumentError`；`String get value`；`operator ==`、`hashCode`、`toString`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 写入 `packages/iesim_core/test/value/phone_number_test.dart`：
 
@@ -142,7 +142,7 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -151,7 +151,7 @@ dart test test/value/phone_number_test.dart
 
 Expected: FAIL，找不到 `phone_number.dart`。
 
-- [ ] **Step 3: 实现 PhoneNumber**
+- [x] **Step 3: 实现 PhoneNumber**
 
 写入 `packages/iesim_core/lib/src/value/phone_number.dart`：
 
@@ -202,7 +202,7 @@ class PhoneNumber {
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -211,7 +211,7 @@ dart test test/value/phone_number_test.dart
 
 Expected: 8 个测试全部 PASS。
 
-- [ ] **Step 5: 导出并提交**
+- [x] **Step 5: 导出并提交**
 
 在 `packages/iesim_core/lib/iesim_core.dart` 追加：
 
@@ -244,7 +244,7 @@ git commit -m "feat: 添加 PhoneNumber 值对象，规范化存储号码"
   - `class Plan`：`name`、`cyclePrice`（`Money?`）、`cycleDays`（`int?`，>0）、`startDate`（`DateTime?` UTC）、`expiryDate`（`DateTime?` UTC）、`isLongTerm`（`bool`，默认 false）；含 `copyWith`、`operator ==`、`hashCode`
   - `class Appearance`：`flag`、`cardColorHex`、`cardBackgroundAssetName`、`websiteURL`、`customPrompt`（均 `String?`）；含 `copyWith`、`operator ==`、`hashCode`
 
-- [ ] **Step 1: 写失败测试（Plan）**
+- [x] **Step 1: 写失败测试（Plan）**
 
 写入 `packages/iesim_core/test/model/plan_test.dart`：
 
@@ -303,7 +303,7 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -312,7 +312,7 @@ dart test test/model/plan_test.dart
 
 Expected: FAIL，找不到 `plan.dart`。
 
-- [ ] **Step 3: 实现 Plan**
+- [x] **Step 3: 实现 Plan**
 
 写入 `packages/iesim_core/lib/src/model/plan.dart`：
 
@@ -398,7 +398,7 @@ class Plan {
 
 注意：Dart 禁止 const 构造函数带构造体（`const_constructor_with_body` 编译错误），因此 `Plan` 为非 const 构造，校验在构造体中 throw `ArgumentError`——与 KeepAlive 的校验模式一致（实测 2026-08-08 修正，原计划误写 const）。
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -407,7 +407,7 @@ dart test test/model/plan_test.dart
 
 Expected: 5 个测试全部 PASS。
 
-- [ ] **Step 5: 写失败测试（Appearance）**
+- [x] **Step 5: 写失败测试（Appearance）**
 
 写入 `packages/iesim_core/test/model/appearance_test.dart`：
 
@@ -446,7 +446,7 @@ void main() {
 }
 ```
 
-- [ ] **Step 6: 运行测试确认失败**
+- [x] **Step 6: 运行测试确认失败**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -455,7 +455,7 @@ dart test test/model/appearance_test.dart
 
 Expected: FAIL，找不到 `appearance.dart`。
 
-- [ ] **Step 7: 实现 Appearance**
+- [x] **Step 7: 实现 Appearance**
 
 写入 `packages/iesim_core/lib/src/model/appearance.dart`：
 
@@ -520,7 +520,7 @@ class Appearance {
 }
 ```
 
-- [ ] **Step 8: 运行测试确认通过**
+- [x] **Step 8: 运行测试确认通过**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -529,7 +529,7 @@ dart test test/model/appearance_test.dart
 
 Expected: 3 个测试全部 PASS。
 
-- [ ] **Step 9: 导出并提交**
+- [x] **Step 9: 导出并提交**
 
 在 `packages/iesim_core/lib/iesim_core.dart` 追加：
 
@@ -561,7 +561,7 @@ git commit -m "feat: 添加 Plan 与 Appearance 模型"
 - Consumes: `PhoneNumber(String)`（Task 1）；`Plan`（Task 2）；`Appearance`（Task 2）；`KeepAlive`（计划 1）
 - Produces: `class Subscription`，构造 `Subscription({required String id, String? iccid, required PhoneNumber number, String? operator, required Plan plan, required KeepAlive keepAlive, List<String>? tags, Appearance appearance = const Appearance(), required String timeZoneId, required DateTime createdAt, required DateTime updatedAt})`；`tags` 为不可变 `List<String>`；含 `copyWith`、`operator ==`、`hashCode`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 写入 `packages/iesim_core/test/model/subscription_test.dart`：
 
@@ -654,7 +654,7 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -663,7 +663,7 @@ dart test test/model/subscription_test.dart
 
 Expected: FAIL，找不到 `subscription.dart`。
 
-- [ ] **Step 3: 实现 Subscription**
+- [x] **Step 3: 实现 Subscription**
 
 写入 `packages/iesim_core/lib/src/model/subscription.dart`：
 
@@ -807,7 +807,7 @@ class Subscription {
 
 注：`copyWith` 与 KeepAlive 一致，无法将可空字段（`iccid`/`operator`）置回 null；确需清空时直接构造新实例。
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -816,7 +816,7 @@ dart test test/model/subscription_test.dart
 
 Expected: 6 个测试全部 PASS。
 
-- [ ] **Step 5: 导出并提交**
+- [x] **Step 5: 导出并提交**
 
 在 `packages/iesim_core/lib/iesim_core.dart` 追加：
 
@@ -845,7 +845,7 @@ git commit -m "feat: 添加 Subscription 聚合根"
 - Consumes: `Money`（计划 1）
 - Produces: `enum ActivityType { topUp, call, sms, renewal }`；`class ActivityRecord`，构造 `ActivityRecord({required String id, required String subscriptionId, required ActivityType type, required DateTime occurredAt, Money? amount})`；含 `copyWith`、`operator ==`、`hashCode`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 写入 `packages/iesim_core/test/model/activity_record_test.dart`：
 
@@ -919,7 +919,7 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -928,7 +928,7 @@ dart test test/model/activity_record_test.dart
 
 Expected: FAIL，找不到 `activity_record.dart`。
 
-- [ ] **Step 3: 实现 ActivityRecord**
+- [x] **Step 3: 实现 ActivityRecord**
 
 写入 `packages/iesim_core/lib/src/model/activity_record.dart`：
 
@@ -1017,7 +1017,7 @@ class ActivityRecord {
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -1026,7 +1026,7 @@ dart test test/model/activity_record_test.dart
 
 Expected: 5 个测试全部 PASS。
 
-- [ ] **Step 5: 导出并提交**
+- [x] **Step 5: 导出并提交**
 
 在 `packages/iesim_core/lib/iesim_core.dart` 追加：
 
@@ -1062,7 +1062,7 @@ git commit -m "feat: 添加 ActivityRecord 动作记录模型"
   - `Database openIesimStore(String path)`（`:memory:` 为内存库；开启外键约束并建表）
   - `void createSchema(Database db)`（幂等：订阅表、动作记录表、资产域 5 表、索引；`PRAGMA user_version = 1`）
 
-- [ ] **Step 1: 添加依赖**
+- [x] **Step 1: 添加依赖**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -1072,7 +1072,7 @@ dart pub add sqlite3:^3.5.1
 
 Expected: 依赖解析成功。若因 native assets 报错，改执行 `dart pub add 'sqlite3:^2.9.0'` 并继续（前置条件已说明回退方案）。
 
-- [ ] **Step 2: 写失败测试（Result）**
+- [x] **Step 2: 写失败测试（Result）**
 
 写入 `packages/iesim_core/test/result_test.dart`：
 
@@ -1109,7 +1109,7 @@ void main() {
 }
 ```
 
-- [ ] **Step 3: 运行测试确认失败**
+- [x] **Step 3: 运行测试确认失败**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -1118,7 +1118,7 @@ dart test test/result_test.dart
 
 Expected: FAIL，找不到 `result.dart`。
 
-- [ ] **Step 4: 实现 Result**
+- [x] **Step 4: 实现 Result**
 
 写入 `packages/iesim_core/lib/src/result.dart`：
 
@@ -1162,7 +1162,7 @@ class StoreError extends Failure {
 }
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+- [x] **Step 5: 运行测试确认通过**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -1171,7 +1171,7 @@ dart test test/result_test.dart
 
 Expected: 3 个测试全部 PASS。
 
-- [ ] **Step 6: 写失败测试（数据库与 schema）**
+- [x] **Step 6: 写失败测试（数据库与 schema）**
 
 写入 `packages/iesim_core/test/store/database_test.dart`：
 
@@ -1261,7 +1261,7 @@ void main() {
 }
 ```
 
-- [ ] **Step 7: 运行测试确认失败**
+- [x] **Step 7: 运行测试确认失败**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -1270,7 +1270,7 @@ dart test test/store/database_test.dart
 
 Expected: FAIL，找不到 `database.dart`。
 
-- [ ] **Step 8: 实现 database.dart**
+- [x] **Step 8: 实现 database.dart**
 
 写入 `packages/iesim_core/lib/src/store/database.dart`：
 
@@ -1378,7 +1378,7 @@ PRAGMA user_version = 1;
 
 注：`Database.execute` 内部使用 `sqlite3_exec`，支持一次执行多条语句。
 
-- [ ] **Step 9: 运行测试确认通过**
+- [x] **Step 9: 运行测试确认通过**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -1387,7 +1387,7 @@ dart test test/store/database_test.dart
 
 Expected: 5 个测试全部 PASS。
 
-- [ ] **Step 10: 导出并提交**
+- [x] **Step 10: 导出并提交**
 
 在 `packages/iesim_core/lib/iesim_core.dart` 追加：
 
@@ -1426,7 +1426,7 @@ git commit -m "feat: 添加 Result 类型与 SQLite 存储骨架（含资产域�
   - `Result<void> delete(String id)`
   - 一切 sqlite 异常捕获为 `Err(StoreError(...))`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 写入 `packages/iesim_core/test/store/subscription_repository_test.dart`：
 
@@ -1547,7 +1547,7 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -1556,7 +1556,7 @@ dart test test/store/subscription_repository_test.dart
 
 Expected: FAIL，找不到 `subscription_repository.dart`。
 
-- [ ] **Step 3: 实现 SubscriptionRepository**
+- [x] **Step 3: 实现 SubscriptionRepository**
 
 写入 `packages/iesim_core/lib/src/store/subscription_repository.dart`：
 
@@ -1723,7 +1723,7 @@ class SubscriptionRepository {
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -1732,7 +1732,7 @@ dart test test/store/subscription_repository_test.dart
 
 Expected: 7 个测试全部 PASS。
 
-- [ ] **Step 5: 导出并提交**
+- [x] **Step 5: 导出并提交**
 
 在 `packages/iesim_core/lib/iesim_core.dart` 追加：
 
@@ -1765,7 +1765,7 @@ git commit -m "feat: 添加 SubscriptionRepository 持久化"
   - `Result<List<ActivityRecord>> listAll()`（计划 4 同步用，按 `occurred_at` 升序）
   - 一切 sqlite 异常捕获为 `Err(StoreError(...))`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 写入 `packages/iesim_core/test/store/activity_record_repository_test.dart`：
 
@@ -1873,7 +1873,7 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -1882,7 +1882,7 @@ dart test test/store/activity_record_repository_test.dart
 
 Expected: FAIL，找不到 `activity_record_repository.dart`。
 
-- [ ] **Step 3: 实现 ActivityRecordRepository**
+- [x] **Step 3: 实现 ActivityRecordRepository**
 
 写入 `packages/iesim_core/lib/src/store/activity_record_repository.dart`：
 
@@ -1973,7 +1973,7 @@ class ActivityRecordRepository {
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -1982,7 +1982,7 @@ dart test test/store/activity_record_repository_test.dart
 
 Expected: 6 个测试全部 PASS。
 
-- [ ] **Step 5: 导出并提交**
+- [x] **Step 5: 导出并提交**
 
 在 `packages/iesim_core/lib/iesim_core.dart` 追加：
 
@@ -2008,7 +2008,7 @@ git commit -m "feat: 添加 ActivityRecordRepository 持久化"
 **Interfaces:**
 - Consumes: 全部前置任务产出
 
-- [ ] **Step 1: 全量测试与静态分析**
+- [x] **Step 1: 全量测试与静态分析**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -2019,7 +2019,7 @@ dart analyze
 
 Expected: 全部测试通过（计划 1 的 45 个 + 本计划新增），`dart analyze` 无 issue。
 
-- [ ] **Step 2: 覆盖率检查**
+- [x] **Step 2: 覆盖率检查**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -2074,7 +2074,7 @@ dart /tmp/cov_lcov.dart
 
 Expected: 总计 ≥80%。不足则参照计划 1 的收尾提交（`test: 补齐 Money 与 KeepAlive 用例，覆盖率升至 100%`）的模式补齐用例——重点检查 `model/` 各构造分支与仓库异常分支是否已覆盖。
 
-- [ ] **Step 3: 清理产物并提交收尾**
+- [x] **Step 3: 清理产物并提交收尾**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -2090,7 +2090,7 @@ git add packages/iesim_core/test/
 git commit -m "test: 补齐覆盖率至 80% 以上"
 ```
 
-- [ ] **Step 4: 勾选计划**
+- [x] **Step 4: 勾选计划**
 
 将本文件所有任务复选框勾选为 `- [x]`，并提交：
 

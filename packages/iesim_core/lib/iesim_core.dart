@@ -8,3 +8,5 @@ export 'src/model/keep_alive.dart';
 export 'src/keepalive/status.dart';
 export 'src/keepalive/evaluator.dart';
 export 'src/value/phone_number.dart';
+export 'src/model/plan.dart';
+export 'src/model/appearance.dart';

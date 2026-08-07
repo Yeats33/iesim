@@ -53,7 +53,7 @@ SimJ 与 SimHub 是直接竞品。二者共同的结构性弱点是**只有号�
 ```
 iesim/
 ├── packages/
-│   └── iesim_core/           纯 Dart，不依赖 Flutter
+│   └── iesim_core/           业务核心，不直接依赖平台插件
 │       ├── lib/
 │       │   ├── model/        实体定义（资产域 + 订阅域）
 │       │   ├── keepalive/    保号周期计算
@@ -68,9 +68,13 @@ iesim/
 
 **分层原则**：`app/` 不含任何业务规则。到期判定、保号推算、同步冲突裁决全在 `iesim_core`。
 
-**收益**：`iesim_core` 仅依赖 `dart:core` 与 `sqflite_common_ffi`，可在无 GUI 的 Linux 服务器上直接 `dart test`，覆盖全部业务逻辑。UI 调试在 macOS 进行。
+**唯一的硬约束**：`iesim_core` 不直接依赖**平台插件**（带原生实现的包）。平台能力——设备时区、本地通知、文件选择——一律由 `app/` 层获取后注入。依据是可测试性：插件在测试环境中没有原生实现，core 内直接调用会使测试崩溃。
 
-**代价**：Dart 侧无法使用 Flutter 专有的状态管理便利；跨包引用需配置 path 依赖。
+除此之外不限制 core 的依赖，包括 Flutter 本身。优先选纯 Dart 实现是因为轻量，但不为此牺牲效果。
+
+**收益**：core 的业务逻辑测试可在无 GUI 的 Linux 服务器上执行，无需模拟器。UI 调试在 macOS 进行。
+
+**代价**：跨包引用需配置 path 依赖；平台能力需定义注入接口，比直接调用多一层。
 
 ## 3. 数据模型
 
@@ -214,10 +218,10 @@ sealed class 使 UI 侧 `switch` 强制穷尽，遗漏分支在编译期即报�
 
 **显示规则**：转换到订阅的 `timeZoneId` 呈现，并标注时区（例如 `2026-08-10（UTC+8）`）。用户在其他时区查看时，日期标注使其明确知晓基准，不会误读。
 
-**依赖与分层约束**：
+**依赖与分层**：
 
-- `timezone`（v0.11.1，IANA 数据库）为纯 Dart 包，置于 `iesim_core`，承担全部时区换算。
-- `flutter_timezone`（v5.1.0）为 Flutter 插件，**只能位于 `app/` 层**。设备当前时区由 app 层获取后作为参数传入 core，core 不得自行查询设备时区，以维持其对 Flutter 的零依赖。
+- `timezone`（v0.11.1，IANA 数据库）承担全部时区换算，置于 `iesim_core`。
+- `flutter_timezone`（v5.1.0）为**平台插件**，由 `app/` 层获取设备时区后作为参数传入 core。此约束的依据是可测试性而非「保持纯 Dart」：平台插件在测试环境中没有原生实现，core 内直接调用会导致测试崩溃。同理适用于后续任何平台插件（通知、文件选择等），一律由 app 层注入。
 
 ## 5. 互操作
 
@@ -261,13 +265,9 @@ sealed class 使 UI 侧 `switch` 强制穷尽，遗漏分支在编译期即报�
 
 **扩展字段**：`iccid`、`lastActivityAt`、`activityConfidence`、`timeZoneId`、`activityRecords` 为本项目新增，SimHub 与 SimJ 均无。写入时置于顶层，旧版本读取时会忽略，不破坏兼容。
 
-**日期的时区推断**：SimHub 的 `expiryDate` / `createdAt` 为不含时区的 ISO 日期。导入时按以下顺序确定基准时区：
+**日期的时区解释**：SimHub 的 `expiryDate` / `createdAt` 为不含时区的 ISO 日期，其语义即**导出设备的本地日期**。因此导入时按导入设备的当前时区解释；若该条记录含本项目扩展字段 `timeZoneId`，则优先采用该值。
 
-1. 若存在本项目的扩展字段 `timeZoneId`，采用之；
-2. 否则依据 `countryCode` 映射到该国主要时区（如 `CN` → `Asia/Shanghai`）；
-3. 映射不存在或该国跨多时区（如 `US`）时，退回导入设备的当前时区，并将该条记录计入导入报告，提示用户核对。
-
-不静默假定 UTC——把本地日期当作 UTC 时刻会引入最多一天的偏差，且偏差方向随用户所在时区变化，属于难以察觉的错误。
+不假定 UTC——把设备本地日期当作 UTC 时刻会引入最多一天的偏差，且偏差方向随用户所在时区变化，属于难以察觉的错误。
 
 导出时 `expiryDate` 写回该订阅基准时区下的日历日，保证与 SimHub / SimJ 往返一致。
 
@@ -285,7 +285,7 @@ NekokoLPA2 将标签内嵌于 profile 的 nickname 字符串，规范（逆向�
 
 以 **ICCID** 作为与 Nekoko 的关联键。
 
-本项目在 `iesim_core/interop/` 中以纯 Dart 重新实现该编解码（约 200 行字符串处理），而非引入 Nekoko 依赖，以保持 core 包对 Flutter 的零依赖与可独立测试。
+本项目在 `iesim_core/interop/` 中自行实现该编解码（约 200 行字符串处理），而非引入 Nekoko 作为依赖——为 200 行字符串处理引入一个完整的 LPA 应用不划算，且 Nekoko 未以 package 形式发布。v2 复用其 LPA 代码时另行处理（见 §10）。
 
 ## 6. WebDAV 同步
 
@@ -328,7 +328,7 @@ v1 同步 `Subscription`、`ActivityRecord` 及其墓碑。资产域（Device / 
 
 ## 8. 测试策略
 
-`iesim_core` 为纯 Dart 包，全部测试可在服务器上 `dart test` 执行，无需模拟器。
+`iesim_core` 的全部测试可在无 GUI 的 Linux 服务器上执行，无需模拟器。若 core 最终不含 Flutter 依赖则用 `dart test`，含则用 `flutter test`——后者在 Linux 上同样不需要图形环境，仅 widget 测试需要，而 widget 测试属于 `app/` 层。
 
 | 层 | 内容 | 重点 |
 |---|---|---|

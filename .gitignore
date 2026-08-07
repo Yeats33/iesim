@@ -5,3 +5,4 @@ pubspec.lock
 *.iml
 .idea/
 .DS_Store
+.superpowers/

@@ -83,6 +83,7 @@ void main() {
     test('listAll 按创建时间升序', () {
       final early = full().copyWith(
         id: 'sub-0',
+        iccid: '89000000000000000002',
         createdAt: DateTime.utc(2026, 7, 1),
         updatedAt: DateTime.utc(2026, 7, 1),
       );

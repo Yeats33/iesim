@@ -109,23 +109,27 @@ class Subscription {
   final KeepAlive keepAlive;
   final List<String> tags;
   final Appearance appearance;
-  final DateTime updatedAt;     // 同步用
+  final String timeZoneId;      // IANA 基准时区，如 Asia/Shanghai
+  final DateTime updatedAt;     // UTC，同步用
 }
 
 class Plan {
   final String? name;
   final Money? cyclePrice;
   final int? cycleDays;
-  final DateTime? startDate;
-  final DateTime? expiryDate;
+  final DateTime? startDate;    // UTC
+  final DateTime? expiryDate;   // UTC
   final bool isLongTerm;
 }
 
 class KeepAlive {
   final bool required;
   final int? cycleDays;
-  final DateTime? lastActivityAt;
+  final DateTime? lastActivityAt;   // UTC
+  final DataConfidence confidence;  // 该值是确认的还是推测的
 }
+
+enum DataConfidence { confirmed, inferred }
 
 class Money {
   final int minorUnits;         // 整数存储，避免浮点误差
@@ -169,26 +173,51 @@ class ProfileWiped extends AssetEvent { Eid from; }
 
 SimJ 与 SimHub 均只有到期日与周期天数，无「上次动作时间」，因而无法表达「套餐尚余 20 天，但保号动作 3 天内必须完成」——而这正是最易踩坑的场景。
 
-### 4.2 状态
+### 4.2 状态与数据可信度
 
 ```dart
 sealed class KeepAliveStatus {}
 class NotRequired extends KeepAliveStatus {}
-class Safe        extends KeepAliveStatus { final int daysLeft; }
-class DueSoon     extends KeepAliveStatus { final int daysLeft; }
-class Overdue     extends KeepAliveStatus { final int daysOver; }
+class Safe        extends KeepAliveStatus { final int daysLeft; final bool inferred; }
+class DueSoon     extends KeepAliveStatus { final int daysLeft; final bool inferred; }
+class Overdue     extends KeepAliveStatus { final int daysOver;  final bool inferred; }
 class Unknown     extends KeepAliveStatus {}
 ```
 
-`Unknown` 为刻意保留的状态：当 `lastActivityAt` 缺失时显示「未知」而非默认「安全」。静默误判是保号工具最不可接受的失败模式。
-
 sealed class 使 UI 侧 `switch` 强制穷尽，遗漏分支在编译期即报错。
+
+**数据可信度采用推测值折中，而非一律显示未知。** 三档行为：
+
+| 情形 | `lastActivityAt` | `confidence` | 呈现 |
+|---|---|---|---|
+| 用户明确填写或记录过动作 | 该时刻 | `confirmed` | 正常显示 |
+| 新建订阅未填 | 默认为创建时刻 | `inferred` | 正常显示 + 问号角标 |
+| 导入数据缺失且无创建时间 | `null` | — | `Unknown` |
+
+理由：多数用户是刚充值后才想起录入，「创建即最近一次动作」这一假设通常成立，全部显示「未知」会淹没真正需要注意的记录。但推测值**必须在 UI 上可辨识**，不得伪装为确凿数据。
+
+`Unknown` 仍然保留，用于导入数据确实无从推测的情况。任何情况下都不得把缺失数据默认呈现为「安全」——静默误判是保号工具最不可接受的失败模式。
 
 ### 4.3 日期与时区
 
-保号截止日是**日历日期**而非时刻。全部按用户本地时区的日期计算，存储为 ISO 日期字符串（`YYYY-MM-DD`）。
+**存储一律为 UTC，显示一律转换为本地时间并标注时区。**
 
-跨时区旅行是本产品的高频场景（用户持多国号码），必须避免「飞越时区后剩余天数跳变」。因此：日期比较一律先归一化到本地日历日，不做 UTC 时刻减法。
+每条订阅携带 `timeZoneId`（IANA 标识，如 `Asia/Shanghai`），在创建时自动捕获设备当时的时区，可由用户修改。
+
+**为什么需要基准时区**：保号截止日是**日历日期**，而「还剩几天」取决于以哪个时区的日历为准。若按用户当前所在地计算，跨时区飞行会使剩余天数跳变（在北京显示 2 天，落地纽约变 3 天），造成不必要的困惑甚至误判。固定基准时区可消除跳变。
+
+**计算规则**：
+
+1. 截止时刻 = `lastActivityAt`（UTC）+ `cycleDays`
+2. 将截止时刻与当前时刻均转换到订阅的 `timeZoneId`
+3. 在该时区下取两者的日历日，做日期减法得出剩余天数
+
+**显示规则**：转换到订阅的 `timeZoneId` 呈现，并标注时区（例如 `2026-08-10（UTC+8）`）。用户在其他时区查看时，日期标注使其明确知晓基准，不会误读。
+
+**依赖与分层约束**：
+
+- `timezone`（v0.11.1，IANA 数据库）为纯 Dart 包，置于 `iesim_core`，承担全部时区换算。
+- `flutter_timezone`（v5.1.0）为 Flutter 插件，**只能位于 `app/` 层**。设备当前时区由 app 层获取后作为参数传入 core，core 不得自行查询设备时区，以维持其对 Flutter 的零依赖。
 
 ## 5. 互操作
 
@@ -230,7 +259,17 @@ sealed class 使 UI 侧 `switch` 强制穷尽，遗漏分支在编译期即报�
 
 **兼容性注意**：`cardType` 与 `billingType` 两个字段名均需接受（格式演进遗留）；`tags` 为数组，而 SimJ 内部转为逗号分隔字符串，导出时须还原为数组。
 
-**扩展字段**：`iccid`、`lastActivityAt`、`activityRecords` 为本项目新增，SimHub 与 SimJ 均无。写入时置于顶层，旧版本读取时会忽略，不破坏兼容。
+**扩展字段**：`iccid`、`lastActivityAt`、`activityConfidence`、`timeZoneId`、`activityRecords` 为本项目新增，SimHub 与 SimJ 均无。写入时置于顶层，旧版本读取时会忽略，不破坏兼容。
+
+**日期的时区推断**：SimHub 的 `expiryDate` / `createdAt` 为不含时区的 ISO 日期。导入时按以下顺序确定基准时区：
+
+1. 若存在本项目的扩展字段 `timeZoneId`，采用之；
+2. 否则依据 `countryCode` 映射到该国主要时区（如 `CN` → `Asia/Shanghai`）；
+3. 映射不存在或该国跨多时区（如 `US`）时，退回导入设备的当前时区，并将该条记录计入导入报告，提示用户核对。
+
+不静默假定 UTC——把本地日期当作 UTC 时刻会引入最多一天的偏差，且偏差方向随用户所在时区变化，属于难以察觉的错误。
+
+导出时 `expiryDate` 写回该订阅基准时区下的日历日，保证与 SimHub / SimJ 往返一致。
 
 ### 5.2 Nekoko 标签（双向）
 
@@ -293,7 +332,9 @@ v1 同步 `Subscription`、`ActivityRecord` 及其墓碑。资产域（Device / 
 
 | 层 | 内容 | 重点 |
 |---|---|---|
-| 单元 | 保号计算 | 边界日期、跨月、闰年、时区归一化 |
+| 单元 | 保号计算 | 边界日期、跨月、闰年 |
+| 单元 | 时区正确性 | 跨时区查看不跳变、夏令时切换日、UTC±14 极端时区、跨国境日期线 |
+| 单元 | 数据可信度 | `inferred` 不被误升为 `confirmed`、导入缺失字段落入 `Unknown` |
 | 单元 | 标签编解码 | 转义字符往返、畸形输入不崩溃 |
 | 单元 | SimHub JSON | 往返一致性（round-trip）、缺字段容错、`cardType`/`billingType` 双名 |
 | 单元 | 状态机 | `KeepAliveStatus` 全分支覆盖 |

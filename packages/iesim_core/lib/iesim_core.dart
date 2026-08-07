@@ -10,3 +10,4 @@ export 'src/keepalive/evaluator.dart';
 export 'src/value/phone_number.dart';
 export 'src/model/plan.dart';
 export 'src/model/appearance.dart';
+export 'src/model/subscription.dart';

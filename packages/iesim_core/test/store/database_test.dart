@@ -64,9 +64,9 @@ void main() {
         var db = openIesimStore(path);
         db.execute(
           "INSERT INTO subscriptions "
-          "(id, number, keepalive_required, plan_is_long_term, tags_json, "
-          " time_zone_id, created_at, updated_at) "
-          "VALUES ('s1', '13800000000', 0, 0, '[]', "
+          "(id, number, keepalive_required, keepalive_confidence, "
+          " plan_is_long_term, tags_json, time_zone_id, created_at, updated_at) "
+          "VALUES ('s1', '13800000000', 0, 'confirmed', 0, '[]', "
           " 'Asia/Shanghai', '2026-08-07T00:00:00.000Z', '2026-08-07T00:00:00.000Z')",
         );
         db.close();

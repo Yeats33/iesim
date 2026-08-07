@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   keepalive_required INTEGER NOT NULL,
   keepalive_cycle_days INTEGER,
   keepalive_last_activity_at TEXT,
-  keepalive_confidence TEXT NOT NULL DEFAULT 'confirmed',
+  keepalive_confidence TEXT NOT NULL,
   tags_json TEXT NOT NULL DEFAULT '[]',
   appearance_flag TEXT,
   appearance_color_hex TEXT,

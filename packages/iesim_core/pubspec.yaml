@@ -7,6 +7,7 @@ environment:
   sdk: ^3.10.0
 
 dependencies:
+  sqlite3: ^3.5.1
   timezone: ^0.11.1
 
 dev_dependencies:

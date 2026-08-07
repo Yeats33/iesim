@@ -12,3 +12,5 @@ export 'src/model/plan.dart';
 export 'src/model/appearance.dart';
 export 'src/model/subscription.dart';
 export 'src/model/activity_record.dart';
+export 'src/result.dart';
+export 'src/store/database.dart';

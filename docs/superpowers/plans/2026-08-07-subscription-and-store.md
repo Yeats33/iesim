@@ -1092,7 +1092,8 @@ void main() {
     });
 
     test('Err 携带失败原因且可模式匹配', () {
-      const Err<int> err = Err(StoreError('磁盘写入失败'));
+      // 声明为 Result<int> 而非 Err<int>，避免分析器静态判断 Ok 分支不可达
+      const Result<int> err = Err(StoreError('磁盘写入失败'));
       final message = switch (err) {
         Ok() => '',
         Err(failure: final f) => f.toString(),
@@ -1202,13 +1203,13 @@ void main() {
           'profiles',
         ]),
       );
-      db.dispose();
+      db.close();
     });
 
     test('user_version 为 1，为未来迁移留锚点', () {
       final db = openIesimStore(':memory:');
       expect(db.select('PRAGMA user_version').single.values.first, equals(1));
-      db.dispose();
+      db.close();
     });
 
     test('createSchema 幂等，重复调用不报错', () {
@@ -1219,7 +1220,7 @@ void main() {
         db.select("SELECT COUNT(*) FROM sqlite_master WHERE type='table'"),
         isNotEmpty,
       );
-      db.dispose();
+      db.close();
     });
 
     test('外键约束开启：孤儿动作记录被拒绝', () {
@@ -1231,7 +1232,7 @@ void main() {
         ),
         throwsA(isA<SqliteException>()),
       );
-      db.dispose();
+      db.close();
     });
 
     test('文件库可持久化：关闭重开后数据仍在', () {
@@ -1241,17 +1242,17 @@ void main() {
         var db = openIesimStore(path);
         db.execute(
           "INSERT INTO subscriptions "
-          "(id, number, keepalive_required, plan_is_long_term, tags_json, "
-          " time_zone_id, created_at, updated_at) "
-          "VALUES ('s1', '13800000000', 0, 0, '[]', "
+          "(id, number, keepalive_required, keepalive_confidence, "
+          " plan_is_long_term, tags_json, time_zone_id, created_at, updated_at) "
+          "VALUES ('s1', '13800000000', 0, 'confirmed', 0, '[]', "
           " 'Asia/Shanghai', '2026-08-07T00:00:00.000Z', '2026-08-07T00:00:00.000Z')",
         );
-        db.dispose();
+        db.close();
 
         db = openIesimStore(path);
         final rows = db.select('SELECT id FROM subscriptions');
         expect(rows.single['id'], equals('s1'));
-        db.dispose();
+        db.close();
       } finally {
         dir.deleteSync(recursive: true);
       }
@@ -1308,7 +1309,8 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   keepalive_required INTEGER NOT NULL,
   keepalive_cycle_days INTEGER,
   keepalive_last_activity_at TEXT,
-  keepalive_confidence TEXT NOT NULL DEFAULT 'confirmed',
+  -- 无默认值：缺失数据不得回退为「安全」档（Global Constraints），写入方必须显式提供
+  keepalive_confidence TEXT NOT NULL,
   tags_json TEXT NOT NULL DEFAULT '[]',
   appearance_flag TEXT,
   appearance_color_hex TEXT,
@@ -1450,7 +1452,7 @@ void main() {
     repo = SubscriptionRepository(db);
   });
 
-  tearDown(() => db.dispose());
+  tearDown(() => db.close());
 
   Subscription full() => Subscription(
         id: 'sub-1',
@@ -1512,8 +1514,11 @@ void main() {
     });
 
     test('listAll 按创建时间升序', () {
+      // iccid 必须与 full() 不同：schema 的 iccid UNIQUE 会让
+      // INSERT OR REPLACE 第二次 upsert 时替换掉 early 行
       final early = full().copyWith(
         id: 'sub-0',
+        iccid: '89000000000000000002',
         createdAt: DateTime.utc(2026, 7, 1),
         updatedAt: DateTime.utc(2026, 7, 1),
       );
@@ -1533,7 +1538,7 @@ void main() {
     });
 
     test('数据库关闭后操作返回 Err(StoreError)', () {
-      db.dispose();
+      db.close();
       final result = repo.upsert(full());
       expect(result, isA<Err<void>>());
       expect((result as Err).failure, isA<StoreError>());
@@ -1789,7 +1794,7 @@ void main() {
     subs = SubscriptionRepository(db);
   });
 
-  tearDown(() => db.dispose());
+  tearDown(() => db.close());
 
   void seedSubscription(String id) {
     subs.upsert(Subscription(
@@ -1861,7 +1866,7 @@ void main() {
     });
 
     test('数据库关闭后操作返回 Err(StoreError)', () {
-      db.dispose();
+      db.close();
       expect(repo.listAll(), isA<Err<List<ActivityRecord>>>());
     });
   });

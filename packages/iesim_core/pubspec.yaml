@@ -1,0 +1,14 @@
+name: iesim_core
+description: iesim 业务核心：订阅、保号、资产模型。不依赖平台插件。
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.10.0
+
+dependencies:
+  timezone: ^0.11.1
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^5.0.0

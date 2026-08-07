@@ -1,0 +1,8 @@
+include: package:lints/recommended.yaml
+
+linter:
+  rules:
+    - prefer_final_fields
+    - prefer_const_constructors
+    - avoid_print
+    - always_declare_return_types

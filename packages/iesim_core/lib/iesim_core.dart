@@ -7,3 +7,4 @@ export 'src/time/calendar.dart';
 export 'src/model/keep_alive.dart';
 export 'src/keepalive/status.dart';
 export 'src/keepalive/evaluator.dart';
+export 'src/value/phone_number.dart';

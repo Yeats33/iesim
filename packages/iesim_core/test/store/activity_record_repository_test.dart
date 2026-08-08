@@ -25,25 +25,28 @@ void main() {
   tearDown(() => db.close());
 
   void seedSubscription(String id) {
-    subs.upsert(Subscription(
-      id: id,
-      number: PhoneNumber('13800000000'),
-      plan: Plan(),
-      keepAlive: KeepAlive.notRequired(),
-      timeZoneId: 'Asia/Shanghai',
-      createdAt: DateTime.utc(2026, 8, 1),
-      updatedAt: DateTime.utc(2026, 8, 1),
-    ));
+    subs.upsert(
+      Subscription(
+        id: id,
+        number: PhoneNumber('13800000000'),
+        plan: Plan(),
+        keepAlive: KeepAlive.notRequired(),
+        timeZoneId: 'Asia/Shanghai',
+        createdAt: DateTime.utc(2026, 8, 1),
+        updatedAt: DateTime.utc(2026, 8, 1),
+      ),
+    );
   }
 
-  ActivityRecord record(String id, String subId, DateTime at) =>
-      ActivityRecord(
-        id: id,
-        subscriptionId: subId,
-        type: ActivityType.topUp,
-        occurredAt: at,
-        amount: const Money(minorUnits: 5000, currencyCode: 'CNY'),
-      );
+  ActivityRecord record(String id, String subId, DateTime at) => ActivityRecord(
+    id: id,
+    subscriptionId: subId,
+    type: ActivityType.topUp,
+    occurredAt: at,
+    amount: const Money(minorUnits: 5000, currencyCode: 'CNY'),
+    balanceAfter: const Money(minorUnits: 12500, currencyCode: 'CNY'),
+    note: '运营商 App 校准',
+  );
 
   group('ActivityRecordRepository', () {
     test('append 后 listBySubscription 按时间升序返回', () {
@@ -72,15 +75,22 @@ void main() {
       final got = (repo.listBySubscription('sub-1') as Ok<List<ActivityRecord>>)
           .value
           .single;
+      expect(got, equals(record('a', 'sub-1', DateTime.utc(2026, 8, 1))));
       expect(
-        got,
-        equals(record('a', 'sub-1', DateTime.utc(2026, 8, 1))),
+        got.amount,
+        equals(const Money(minorUnits: 5000, currencyCode: 'CNY')),
       );
-      expect(got.amount, equals(const Money(minorUnits: 5000, currencyCode: 'CNY')));
+      expect(
+        got.balanceAfter,
+        equals(const Money(minorUnits: 12500, currencyCode: 'CNY')),
+      );
+      expect(got.note, '运营商 App 校准');
     });
 
     test('不存在的订阅 append 返回 Err(StoreError)（外键约束）', () {
-      final result = repo.append(record('a', 'no-such-sub', DateTime.utc(2026, 8, 1)));
+      final result = repo.append(
+        record('a', 'no-such-sub', DateTime.utc(2026, 8, 1)),
+      );
       expect(result, isA<Err<void>>());
       expect((result as Err).failure, isA<StoreError>());
     });
@@ -89,8 +99,10 @@ void main() {
       seedSubscription('sub-1');
       repo.append(record('a', 'sub-1', DateTime.utc(2026, 8, 1)));
       subs.delete('sub-1');
-      expect((repo.listBySubscription('sub-1') as Ok<List<ActivityRecord>>).value,
-          isEmpty);
+      expect(
+        (repo.listBySubscription('sub-1') as Ok<List<ActivityRecord>>).value,
+        isEmpty,
+      );
     });
 
     test('数据库关闭后操作返回 Err(StoreError)', () {

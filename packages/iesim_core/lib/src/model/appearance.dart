@@ -32,15 +32,14 @@ class Appearance {
     String? cardBackgroundAssetName,
     String? websiteURL,
     String? customPrompt,
-  }) =>
-      Appearance(
-        flag: flag ?? this.flag,
-        cardColorHex: cardColorHex ?? this.cardColorHex,
-        cardBackgroundAssetName:
-            cardBackgroundAssetName ?? this.cardBackgroundAssetName,
-        websiteURL: websiteURL ?? this.websiteURL,
-        customPrompt: customPrompt ?? this.customPrompt,
-      );
+  }) => Appearance(
+    flag: flag ?? this.flag,
+    cardColorHex: cardColorHex ?? this.cardColorHex,
+    cardBackgroundAssetName:
+        cardBackgroundAssetName ?? this.cardBackgroundAssetName,
+    websiteURL: websiteURL ?? this.websiteURL,
+    customPrompt: customPrompt ?? this.customPrompt,
+  );
 
   @override
   bool operator ==(Object other) =>
@@ -53,6 +52,11 @@ class Appearance {
           other.customPrompt == customPrompt;
 
   @override
-  int get hashCode =>
-      Object.hash(flag, cardColorHex, cardBackgroundAssetName, websiteURL, customPrompt);
+  int get hashCode => Object.hash(
+    flag,
+    cardColorHex,
+    cardBackgroundAssetName,
+    websiteURL,
+    customPrompt,
+  );
 }

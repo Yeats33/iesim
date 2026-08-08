@@ -16,7 +16,11 @@ void main() {
       expect(r.subscriptionId, equals('sub-1'));
       expect(r.type, equals(ActivityType.topUp));
       expect(r.occurredAt, equals(DateTime.utc(2026, 8, 7, 4, 0)));
-      expect(r.amount, equals(const Money(minorUnits: 10000, currencyCode: 'CNY')));
+      expect(r.updatedAt, equals(r.occurredAt));
+      expect(
+        r.amount,
+        equals(const Money(minorUnits: 10000, currencyCode: 'CNY')),
+      );
     });
 
     test('amount 可空（通话与短信无金额）', () {
@@ -41,6 +45,19 @@ void main() {
       );
     });
 
+    test('拒绝非 UTC 的 updatedAt', () {
+      expect(
+        () => ActivityRecord(
+          id: 'act-bad-updated',
+          subscriptionId: 'sub-1',
+          type: ActivityType.sms,
+          occurredAt: DateTime.utc(2026, 8, 7, 5),
+          updatedAt: DateTime(2026, 8, 7, 5),
+        ),
+        throwsArgumentError,
+      );
+    });
+
     test('copyWith 修改后原实例不变', () {
       final r = ActivityRecord(
         id: 'act-4',
@@ -55,11 +72,11 @@ void main() {
 
     test('相同字段视为相等', () {
       ActivityRecord make() => ActivityRecord(
-            id: 'act-5',
-            subscriptionId: 'sub-1',
-            type: ActivityType.topUp,
-            occurredAt: DateTime.utc(2026, 8, 7, 4, 0),
-          );
+        id: 'act-5',
+        subscriptionId: 'sub-1',
+        type: ActivityType.topUp,
+        occurredAt: DateTime.utc(2026, 8, 7, 4, 0),
+      );
       expect(make(), equals(make()));
       expect(make().copyWith(id: 'act-6'), isNot(equals(make())));
     });

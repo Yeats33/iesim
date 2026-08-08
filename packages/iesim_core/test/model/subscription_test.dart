@@ -7,18 +7,18 @@ import 'package:iesim_core/src/value/phone_number.dart';
 
 void main() {
   Subscription base() => Subscription(
-        id: 'sub-1',
-        iccid: '89000000000000000001',
-        number: PhoneNumber('+8613800000000'),
-        operator: '中国移动',
-        plan: Plan(name: '畅享 5G', cycleDays: 30),
-        keepAlive: KeepAlive.notRequired(),
-        tags: const ['主力号'],
-        appearance: const Appearance(flag: '🇨🇳'),
-        timeZoneId: 'Asia/Shanghai',
-        createdAt: DateTime.utc(2026, 8, 7, 4, 0),
-        updatedAt: DateTime.utc(2026, 8, 7, 4, 0),
-      );
+    id: 'sub-1',
+    iccid: '89000000000000000001',
+    number: PhoneNumber('+8613800000000'),
+    operator: '中国移动',
+    plan: Plan(name: '畅享 5G', cycleDays: 30),
+    keepAlive: KeepAlive.notRequired(),
+    tags: const ['主力号'],
+    appearance: const Appearance(flag: '🇨🇳'),
+    timeZoneId: 'Asia/Shanghai',
+    createdAt: DateTime.utc(2026, 8, 7, 4, 0),
+    updatedAt: DateTime.utc(2026, 8, 7, 4, 0),
+  );
 
   group('Subscription', () {
     test('完整构造保留全部字段', () {
@@ -77,10 +77,7 @@ void main() {
 
     test('相同字段视为相等，tags 顺序敏感', () {
       expect(base(), equals(base()));
-      expect(
-        base().copyWith(tags: const ['备胎', '主力号']),
-        isNot(equals(base())),
-      );
+      expect(base().copyWith(tags: const ['备胎', '主力号']), isNot(equals(base())));
     });
 
     test('空 id 与空 timeZoneId 抛出 ArgumentError', () {

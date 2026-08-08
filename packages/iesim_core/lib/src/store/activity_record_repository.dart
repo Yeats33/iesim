@@ -14,18 +14,30 @@ class ActivityRecordRepository {
 
   /// 追加一条动作记录。
   Result<void> append(ActivityRecord record) {
+    return _write(record, replace: false);
+  }
+
+  /// 导入/同步用幂等写入。相同 id 的远端记录覆盖本地记录。
+  Result<void> upsert(ActivityRecord record) => _write(record, replace: true);
+
+  Result<void> _write(ActivityRecord record, {required bool replace}) {
     try {
       _db.execute(
-        '''INSERT INTO activity_records
-  (id, subscription_id, type, occurred_at, amount_minor, amount_currency)
-  VALUES (?, ?, ?, ?, ?, ?)''',
+        '''INSERT ${replace ? 'OR REPLACE ' : ''}INTO activity_records
+  (id, subscription_id, type, occurred_at, updated_at, amount_minor,
+   amount_currency, balance_after_minor, balance_after_currency, note)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         [
           record.id,
           record.subscriptionId,
           record.type.name,
           record.occurredAt.toIso8601String(),
+          record.updatedAt.toIso8601String(),
           record.amount?.minorUnits,
           record.amount?.currencyCode,
+          record.balanceAfter?.minorUnits,
+          record.balanceAfter?.currencyCode,
+          record.note,
         ],
       );
       return const Ok(null);
@@ -68,17 +80,26 @@ class ActivityRecordRepository {
 
   ActivityRecord _rowToRecord(Row row) {
     final minor = row['amount_minor'] as int?;
+    final balanceAfterMinor = row['balance_after_minor'] as int?;
     return ActivityRecord(
       id: row['id'] as String,
       subscriptionId: row['subscription_id'] as String,
       type: ActivityType.values.byName(row['type'] as String),
       occurredAt: DateTime.parse(row['occurred_at'] as String),
+      updatedAt: DateTime.parse(row['updated_at'] as String),
       amount: minor == null
           ? null
           : Money(
               minorUnits: minor,
               currencyCode: row['amount_currency'] as String,
             ),
+      balanceAfter: balanceAfterMinor == null
+          ? null
+          : Money(
+              minorUnits: balanceAfterMinor,
+              currencyCode: row['balance_after_currency'] as String,
+            ),
+      note: row['note'] as String?,
     );
   }
 }

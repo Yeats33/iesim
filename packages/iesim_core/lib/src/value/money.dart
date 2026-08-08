@@ -48,9 +48,9 @@ class Money {
   }
 
   Money copyWith({int? minorUnits, String? currencyCode}) => Money(
-        minorUnits: minorUnits ?? this.minorUnits,
-        currencyCode: currencyCode ?? this.currencyCode,
-      );
+    minorUnits: minorUnits ?? this.minorUnits,
+    currencyCode: currencyCode ?? this.currencyCode,
+  );
 
   @override
   bool operator ==(Object other) =>

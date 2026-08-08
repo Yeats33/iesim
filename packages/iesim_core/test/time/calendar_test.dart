@@ -35,11 +35,15 @@ void main() {
       final instant = DateTime.utc(2026, 8, 7, 20, 0);
       final dayStart = DateTime.utc(2026, 8, 7, 0, 0);
       // 上海：8/7 08:00 → 8/8 04:00，跨了一个日历日
-      expect(ZonedCalendar('Asia/Shanghai').daysBetween(dayStart, instant),
-          equals(1));
+      expect(
+        ZonedCalendar('Asia/Shanghai').daysBetween(dayStart, instant),
+        equals(1),
+      );
       // 纽约：8/6 20:00 → 8/7 16:00，同样跨一日但起点不同
-      expect(ZonedCalendar('America/New_York').daysBetween(dayStart, instant),
-          equals(1));
+      expect(
+        ZonedCalendar('America/New_York').daysBetween(dayStart, instant),
+        equals(1),
+      );
     });
 
     test('夏令时切换日仍按日历日计数', () {
@@ -75,6 +79,31 @@ void main() {
       final start = DateTime.utc(2026, 8, 7, 4, 0); // 北京 12:00
       final result = cal.addDays(start, 30);
       expect(cal.daysBetween(start, result), equals(30));
+    });
+  });
+
+  group('ZonedCalendar 展示与输入转换', () {
+    test('momentAt 返回订阅时区日期和 UTC 偏移', () {
+      final moment = ZonedCalendar(
+        'Asia/Shanghai',
+      ).momentAt(DateTime.utc(2026, 8, 7, 16, 30));
+      expect((moment.year, moment.month, moment.day), equals((2026, 8, 8)));
+      expect((moment.hour, moment.minute), equals((0, 30)));
+      expect(moment.utcOffset, equals(const Duration(hours: 8)));
+    });
+
+    test('utcFromParts 按基准时区解释日期选择器输入', () {
+      final utc = ZonedCalendar(
+        'Asia/Shanghai',
+      ).utcFromParts(year: 2026, month: 8, day: 8, hour: 12);
+      expect(utc, equals(DateTime.utc(2026, 8, 8, 4)));
+    });
+
+    test('momentAt 拒绝非 UTC 时刻', () {
+      expect(
+        () => ZonedCalendar('UTC').momentAt(DateTime(2026, 8, 8)),
+        throwsArgumentError,
+      );
     });
   });
 }

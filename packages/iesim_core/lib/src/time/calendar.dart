@@ -3,6 +3,27 @@ import 'package:timezone/timezone.dart' as tz;
 
 bool _initialized = false;
 
+/// 一个 UTC 时刻在订阅基准时区中的可展示日期部件。
+///
+/// UI 使用这些部件组合本地化文案，避免把设备当前时区误当作订阅时区。
+class ZonedMoment {
+  final int year;
+  final int month;
+  final int day;
+  final int hour;
+  final int minute;
+  final Duration utcOffset;
+
+  const ZonedMoment({
+    required this.year,
+    required this.month,
+    required this.day,
+    required this.hour,
+    required this.minute,
+    required this.utcOffset,
+  });
+}
+
 /// 加载 IANA 时区数据库。使用 ZonedCalendar 前必须调用一次。
 /// 重复调用安全。
 void initializeIesimTimeZones() {
@@ -23,6 +44,7 @@ class ZonedCalendar {
   ZonedCalendar(String timeZoneId) : _location = _resolve(timeZoneId);
 
   static tz.Location _resolve(String timeZoneId) {
+    if (timeZoneId == 'UTC') return tz.UTC;
     try {
       return tz.getLocation(timeZoneId);
     } catch (_) {
@@ -56,6 +78,34 @@ class ZonedCalendar {
     );
     return shifted.toUtc();
   }
+
+  /// 将 UTC 时刻转换为该基准时区中的日历与时钟部件。
+  ZonedMoment momentAt(DateTime utc) {
+    if (!utc.isUtc) {
+      throw ArgumentError.value(utc, 'utc', '必须为 UTC 时刻');
+    }
+    final zoned = tz.TZDateTime.from(utc, _location);
+    return ZonedMoment(
+      year: zoned.year,
+      month: zoned.month,
+      day: zoned.day,
+      hour: zoned.hour,
+      minute: zoned.minute,
+      utcOffset: zoned.timeZoneOffset,
+    );
+  }
+
+  /// 将该基准时区中的本地日历时间转换为 UTC。
+  ///
+  /// 日期选择器只提供年月日；由 core 依据订阅时区解释，避免 app 层把
+  /// 设备时区错误地写入数据。
+  DateTime utcFromParts({
+    required int year,
+    required int month,
+    required int day,
+    int hour = 0,
+    int minute = 0,
+  }) => tz.TZDateTime(_location, year, month, day, hour, minute).toUtc();
 
   /// 取该时刻在基准时区下所属的日历日，归一化为 UTC 零点。
   /// 归一化后两日期相减不受时区偏移与夏令时影响。

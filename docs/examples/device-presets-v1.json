@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "2026.08.1",
+  "updatedAt": "2026-08-08T00:00:00.000Z",
+  "devices": [
+    {
+      "id": "example-phone-cn",
+      "brand": "示例品牌",
+      "model": "Phone 1",
+      "variant": "中国大陆版",
+      "kind": "phone",
+      "region": "CN",
+      "note": "这是一条格式示例，不代表真实设备参数。",
+      "simCapability": "dualPhysical",
+      "supportsSaRoaming": true,
+      "slots": [
+        { "label": "SIM 1", "kind": "physical" },
+        { "label": "SIM 2", "kind": "physical" }
+      ],
+      "aliases": ["P1", "Model A"]
+    }
+  ]
+}

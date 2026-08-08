@@ -1,0 +1,1160 @@
+import 'dart:collection';
+
+import 'package:flutter/foundation.dart';
+import 'package:iesim_core/iesim_core.dart';
+import 'package:uuid/uuid.dart';
+
+import '../services/reminder_notifications.dart';
+import '../services/webdav_service.dart';
+
+/// 应用层状态：只编排仓库与页面，不复制 core 中的日期和保号规则。
+class AppController extends ChangeNotifier {
+  AppController._({
+    required SubscriptionRepository subscriptions,
+    required ActivityRecordRepository activities,
+    required AssetRepository assets,
+    required this._importStore,
+    required this._activityService,
+    required this._reminderNotifications,
+    required this._persistRemindersEnabled,
+    required this._remindersEnabled,
+    required this._persistMuseumAutoArchiveDays,
+    required this._museumAutoArchiveDays,
+    required this._deletionService,
+    required this._subscriptionReminderService,
+    required this._webDav,
+    required this._closeStore,
+  }) : _subscriptionRepository = subscriptions,
+       _activityRepository = activities,
+       _assetRepository = assets;
+
+  factory AppController.open(
+    String databasePath, {
+    ReminderNotificationGateway reminderNotifications =
+        const NoopReminderNotifications(),
+    bool remindersEnabled = true,
+    Future<void> Function(bool value)? persistRemindersEnabled,
+    int? museumAutoArchiveDays = 90,
+    Future<void> Function(int? value)? persistMuseumAutoArchiveDays,
+    WebDavGateway? webDavGateway,
+    bool enableWebDav = false,
+  }) {
+    final database = openIesimStore(databasePath);
+    return AppController._(
+      subscriptions: SubscriptionRepository(database),
+      activities: ActivityRecordRepository(database),
+      assets: AssetRepository(database),
+      importStore: SimHubImportStore(database),
+      activityService: ActivityService(database),
+      reminderNotifications: reminderNotifications,
+      remindersEnabled: remindersEnabled,
+      persistRemindersEnabled: persistRemindersEnabled ?? (_) async {},
+      museumAutoArchiveDays: museumAutoArchiveDays,
+      persistMuseumAutoArchiveDays:
+          persistMuseumAutoArchiveDays ?? (_) async {},
+      deletionService: SubscriptionDeletionService(database),
+      subscriptionReminderService: SubscriptionReminderService(database),
+      webDav:
+          webDavGateway ??
+          (enableWebDav
+              ? AppWebDavService(SyncStore(database))
+              : const NoopWebDavGateway()),
+      closeStore: database.close,
+    );
+  }
+
+  @visibleForTesting
+  factory AppController.inMemory({
+    ReminderNotificationGateway reminderNotifications =
+        const NoopReminderNotifications(),
+    bool remindersEnabled = true,
+    Future<void> Function(bool value)? persistRemindersEnabled,
+    int? museumAutoArchiveDays = 90,
+    Future<void> Function(int? value)? persistMuseumAutoArchiveDays,
+    WebDavGateway? webDavGateway,
+  }) => AppController.open(
+    ':memory:',
+    reminderNotifications: reminderNotifications,
+    remindersEnabled: remindersEnabled,
+    persistRemindersEnabled: persistRemindersEnabled,
+    museumAutoArchiveDays: museumAutoArchiveDays,
+    persistMuseumAutoArchiveDays: persistMuseumAutoArchiveDays,
+    webDavGateway: webDavGateway,
+  );
+
+  final SubscriptionRepository _subscriptionRepository;
+  final ActivityRecordRepository _activityRepository;
+  final AssetRepository _assetRepository;
+  final SimHubImportStore _importStore;
+  final ActivityService _activityService;
+  final ReminderNotificationGateway _reminderNotifications;
+  final Future<void> Function(bool value) _persistRemindersEnabled;
+  final Future<void> Function(int? value) _persistMuseumAutoArchiveDays;
+  final SubscriptionDeletionService _deletionService;
+  final SubscriptionReminderService _subscriptionReminderService;
+  final WebDavGateway _webDav;
+  final VoidCallback _closeStore;
+  final Uuid _uuid = const Uuid();
+  final KeepAliveEvaluator _evaluator = const KeepAliveEvaluator(
+    clock: SystemClock(),
+  );
+
+  List<Subscription> _subscriptions = const [];
+  List<ActivityRecord> _activities = const [];
+  AssetInventory _assets = AssetInventory();
+  bool _ready = false;
+  bool _busy = false;
+  String? _errorMessage;
+  String _defaultTimeZoneId = 'UTC';
+  bool _remindersEnabled;
+  int? _museumAutoArchiveDays;
+  bool _notificationPermissionGranted = false;
+  String? _notificationError;
+  WebDavConfiguration? _webDavConfiguration;
+  SyncRunReport? _lastSyncReport;
+  List<SyncConflictLog> _syncConflicts = const [];
+  SyncState _syncState = const SyncState();
+
+  bool get ready => _ready;
+  bool get busy => _busy;
+  String? get errorMessage => _errorMessage;
+  String get defaultTimeZoneId => _defaultTimeZoneId;
+  bool get remindersEnabled => _remindersEnabled;
+  int? get museumAutoArchiveDays => _museumAutoArchiveDays;
+  bool get notificationPermissionGranted => _notificationPermissionGranted;
+  String? get notificationError => _notificationError;
+  Stream<String> get notificationSelections =>
+      _reminderNotifications.selectedSubscriptionIds;
+  WebDavConfiguration? get webDavConfiguration => _webDavConfiguration;
+  SyncRunReport? get lastSyncReport => _lastSyncReport;
+  UnmodifiableListView<SyncConflictLog> get syncConflicts =>
+      UnmodifiableListView(_syncConflicts);
+  SyncState get syncState => _syncState;
+  int get scheduledReminderCount {
+    final planner = ReminderPlanner(clock: const SystemClock());
+    return _subscriptions.fold(
+      0,
+      (count, subscription) => count + planner.planFor(subscription).length,
+    );
+  }
+
+  UnmodifiableListView<Subscription> get subscriptions =>
+      UnmodifiableListView(_subscriptions);
+  UnmodifiableListView<ActivityRecord> get activities =>
+      UnmodifiableListView(_activities);
+  AssetInventory get assets => _assets;
+
+  Future<void> initialize({required String defaultTimeZoneId}) async {
+    _defaultTimeZoneId = defaultTimeZoneId;
+    initializeIesimTimeZones();
+    var remindersReady = false;
+    try {
+      await _reminderNotifications.initialize();
+      remindersReady = true;
+    } catch (error) {
+      _notificationError = '通知服务初始化失败：$error';
+    }
+    try {
+      _webDavConfiguration = await _webDav.loadConfiguration();
+    } catch (error) {
+      _errorMessage = 'WebDAV 凭据读取失败：$error';
+    }
+    _loadSyncConflicts();
+    _loadSyncState();
+    await reload();
+    if (remindersReady) {
+      await refreshNotificationPermission(reschedule: true);
+    }
+    _ready = true;
+    notifyListeners();
+  }
+
+  KeepAliveStatus statusOf(Subscription subscription) =>
+      _evaluator.evaluate(subscription.keepAlive, subscription.timeZoneId);
+
+  List<ActivityRecord> activitiesFor(String subscriptionId) =>
+      _activities
+          .where((record) => record.subscriptionId == subscriptionId)
+          .toList(growable: false)
+        ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+
+  Subscription? subscriptionById(String id) {
+    for (final subscription in _subscriptions) {
+      if (subscription.id == id) return subscription;
+    }
+    return null;
+  }
+
+  EsimProfile? assetProfileForSubscription(Subscription subscription) {
+    for (final profile in _assets.profiles) {
+      if (profile.subscriptionId == subscription.id) return profile;
+    }
+    final iccid = subscription.iccid;
+    if (iccid == null) return null;
+    for (final profile in _assets.profiles) {
+      if (profile.subscriptionId == null && profile.iccid == iccid) {
+        return profile;
+      }
+    }
+    return null;
+  }
+
+  Future<void> reload() async {
+    _errorMessage = null;
+    final archiveResult = _archiveExpiredProfiles(DateTime.now().toUtc());
+    var automaticallyArchived = 0;
+    if (archiveResult case Err(failure: final failure)) {
+      _errorMessage = _failureMessage(failure);
+    } else if (archiveResult case Ok(value: final count)) {
+      automaticallyArchived = count;
+    }
+    final subscriptionsResult = _subscriptionRepository.listAll();
+    final activitiesResult = _activityRepository.listAll();
+    final assetsResult = _assetRepository.load();
+    switch ((subscriptionsResult, activitiesResult, assetsResult)) {
+      case (
+        Ok(value: final subscriptions),
+        Ok(value: final activities),
+        Ok(value: final assets),
+      ):
+        _subscriptions = subscriptions;
+        _activities = activities.reversed.toList(growable: false);
+        _assets = assets;
+      case (Err(failure: final failure), _, _):
+        _errorMessage = _failureMessage(failure);
+      case (_, Err(failure: final failure), _):
+        _errorMessage = _failureMessage(failure);
+      case (_, _, Err(failure: final failure)):
+        _errorMessage = _failureMessage(failure);
+    }
+    if (automaticallyArchived > 0) await _refreshNotifications();
+    notifyListeners();
+  }
+
+  Future<String?> saveSubscription(Subscription subscription) async {
+    return _mutate(
+      () => _subscriptionReminderService.upsert(
+        subscription: subscription,
+        clock: FixedClock(subscription.updatedAt),
+      ),
+      refreshReminders: true,
+    );
+  }
+
+  /// 原子保存业务 Profile，并将它放入选定卡片的 EID。
+  Future<String?> saveSubscriptionAtEid({
+    required Subscription subscription,
+    required String eidId,
+  }) {
+    final eidExists = _assets.eids.any((eid) => eid.id == eidId);
+    if (!eidExists) return Future.value('选定的 EID 已不存在，请重新选择');
+    final existing = assetProfileForSubscription(subscription);
+    final assetProfile = EsimProfile(
+      id: existing?.id ?? _uuid.v4(),
+      eidId: eidId,
+      iccid: subscription.iccid,
+      operatorName: subscription.operator,
+      nickname: existing?.nickname ?? subscription.details.profileName,
+      subscriptionId: subscription.id,
+      isPinned: subscription.details.isPinned,
+      createdAt: existing?.createdAt ?? subscription.updatedAt,
+      updatedAt: subscription.updatedAt,
+    );
+    return _mutate(
+      () => _subscriptionReminderService.upsert(
+        subscription: subscription,
+        clock: FixedClock(subscription.updatedAt),
+        assetProfile: assetProfile,
+        movementEventId: _uuid.v4(),
+      ),
+      refreshReminders: true,
+    );
+  }
+
+  /// 删除已激活/待激活 Profile 时先移入博物馆；博物馆内才执行永久删除。
+  Future<String?> deleteSubscription(String id) async {
+    final subscription = subscriptionById(id);
+    if (subscription == null) return 'Profile 不存在';
+    if (subscription.lifecycle.stage != ProfileStage.museum) {
+      return archiveProfile(id, reason: ProfileArchiveReason.deleted);
+    }
+    return deleteSubscriptionPermanently(id);
+  }
+
+  Future<String?> deleteSubscriptionPermanently(String id) async {
+    return _mutate(
+      () => _deletionService.delete(
+        subscriptionId: id,
+        nowUtc: DateTime.now().toUtc(),
+      ),
+      refreshReminders: true,
+    );
+  }
+
+  Future<String?> activateProfile(String id) async {
+    final subscription = subscriptionById(id);
+    if (subscription == null) return 'Profile 不存在';
+    final now = DateTime.now().toUtc();
+    return saveSubscription(
+      subscription.copyWith(
+        lifecycle: subscription.lifecycle.activate(now),
+        details: subscription.details.copyWith(
+          activationDate: subscription.details.activationDate ?? now,
+        ),
+        updatedAt: now,
+      ),
+    );
+  }
+
+  Future<String?> archiveProfile(
+    String id, {
+    ProfileArchiveReason reason = ProfileArchiveReason.manual,
+  }) async {
+    final subscription = subscriptionById(id);
+    if (subscription == null) return 'Profile 不存在';
+    final now = DateTime.now().toUtc();
+    return saveSubscription(
+      subscription.copyWith(
+        lifecycle: subscription.lifecycle.archive(now, reason: reason),
+        updatedAt: now,
+      ),
+    );
+  }
+
+  Future<String?> setMuseumAutoArchiveDays(int? days) async {
+    if (days != null && days < 0) return '自动归档天数不能为负数';
+    try {
+      await _persistMuseumAutoArchiveDays(days);
+    } catch (error) {
+      return '自动归档设置保存失败：$error';
+    }
+    _museumAutoArchiveDays = days;
+    await reload();
+    await _refreshNotifications();
+    return _errorMessage;
+  }
+
+  Future<String?> saveDevice(DeviceAsset device) =>
+      _mutate(() => _assetRepository.upsertDevice(device));
+
+  Future<String?> deleteDevice(String id) => _mutate(
+    () =>
+        _assetRepository.deleteDevice(id, deletedAtUtc: DateTime.now().toUtc()),
+  );
+
+  Future<String?> saveSlot(SimSlot slot) =>
+      _mutate(() => _assetRepository.upsertSlot(slot));
+
+  Future<String?> deleteSlot(String id) => _mutate(
+    () => _assetRepository.deleteSlot(id, deletedAtUtc: DateTime.now().toUtc()),
+  );
+
+  Future<String?> saveCard(SimCard card) =>
+      _mutate(() => _assetRepository.upsertCard(card));
+
+  Future<String?> deleteCard(String id) => _mutate(
+    () => _assetRepository.deleteCard(id, deletedAtUtc: DateTime.now().toUtc()),
+  );
+
+  Future<String?> saveEid(Euicc eid) =>
+      _mutate(() => _assetRepository.upsertEid(eid));
+
+  Future<String?> deleteEid(String id) => _mutate(
+    () => _assetRepository.deleteEid(id, deletedAtUtc: DateTime.now().toUtc()),
+  );
+
+  Future<String?> saveProfile(EsimProfile profile) =>
+      _mutate(() => _assetRepository.upsertProfile(profile));
+
+  Future<String?> setSubscriptionPinned(String id, bool isPinned) {
+    final subscription = subscriptionById(id);
+    if (subscription == null) return Future.value('Profile 不存在');
+    if (subscription.details.isPinned == isPinned) return Future.value(null);
+    final now = DateTime.now().toUtc();
+    final linkedProfile = assetProfileForSubscription(subscription);
+    return _mutate(
+      () => _subscriptionReminderService.upsert(
+        subscription: subscription.copyWith(
+          details: subscription.details.copyWith(isPinned: isPinned),
+          updatedAt: now,
+        ),
+        clock: FixedClock(now),
+        assetProfile: linkedProfile?.copyWith(
+          subscriptionId: subscription.id,
+          isPinned: isPinned,
+          updatedAt: now,
+        ),
+      ),
+    );
+  }
+
+  Future<String?> setAssetProfilePinned(String id, bool isPinned) {
+    EsimProfile? profile;
+    for (final candidate in _assets.profiles) {
+      if (candidate.id == id) {
+        profile = candidate;
+        break;
+      }
+    }
+    if (profile == null) return Future.value('Profile 不存在');
+    final subscriptionId = profile.subscriptionId;
+    if (subscriptionId != null && subscriptionById(subscriptionId) != null) {
+      return setSubscriptionPinned(subscriptionId, isPinned);
+    }
+    if (profile.isPinned == isPinned) return Future.value(null);
+    return saveProfile(
+      profile.copyWith(isPinned: isPinned, updatedAt: DateTime.now().toUtc()),
+    );
+  }
+
+  Future<String?> createEmbeddedEuicc({
+    required EmbeddedEuiccCard card,
+    required Euicc eid,
+    required SimSlot slot,
+  }) => _mutate(
+    () => _assetRepository.createEmbeddedEuicc(
+      card: card,
+      eid: eid,
+      slot: slot,
+      eventId: _uuid.v4(),
+      occurredAt: DateTime.now().toUtc(),
+    ),
+  );
+
+  Future<String?> replaceCardInSlot({
+    required String slotId,
+    required String? cardId,
+  }) => _mutate(
+    () => _assetRepository.replaceCardInSlot(
+      slotId: slotId,
+      cardId: cardId,
+      storedEventId: _uuid.v4(),
+      movedEventId: _uuid.v4(),
+      occurredAt: DateTime.now().toUtc(),
+    ),
+  );
+
+  Future<String?> moveCard({
+    required String cardId,
+    required String? toSlotId,
+    String? note,
+  }) => _mutate(
+    () => _assetRepository.moveCard(
+      cardId: cardId,
+      toSlotId: toSlotId,
+      eventId: _uuid.v4(),
+      occurredAt: DateTime.now().toUtc(),
+      note: note,
+    ),
+  );
+
+  Future<String?> moveProfile({
+    required String profileId,
+    required String toEidId,
+    String? note,
+  }) => _mutate(
+    () => _assetRepository.moveProfile(
+      profileId: profileId,
+      toEidId: toEidId,
+      eventId: _uuid.v4(),
+      occurredAt: DateTime.now().toUtc(),
+      note: note,
+    ),
+  );
+
+  Future<String?> wipeProfile(String profileId, {String? note}) => _mutate(
+    () => _assetRepository.wipeProfile(
+      profileId: profileId,
+      eventId: _uuid.v4(),
+      occurredAt: DateTime.now().toUtc(),
+      note: note,
+    ),
+  );
+
+  SimHubImportReport inspectSimHub(String source) => SimHubCodec(
+    idFactory: _uuid.v4,
+  ).decode(source, defaultTimeZoneId: _defaultTimeZoneId);
+
+  Result<NekokoImportReport> inspectNekokoDatabase(String path) =>
+      NekokoDatabaseCodec(idFactory: _uuid.v4).inspectFile(
+        path,
+        defaultTimeZoneId: _defaultTimeZoneId,
+        existingSubscriptions: _subscriptions,
+        existingAssets: _assets,
+      );
+
+  String exportSimHub() =>
+      SimHubCodec().encode(_subscriptions, activityRecords: _activities);
+
+  String exportSimHubV5() => SimHubCodec().encodeV5(
+    _subscriptions,
+    assets: _assets,
+    activityRecords: _activities,
+  );
+
+  Future<String?> applySimHubImport(SimHubImportReport report) async {
+    if (_busy) return '当前操作尚未完成，请稍候';
+    _setBusy(true);
+    final result = _importStore.apply(report);
+    if (result case Err(failure: final failure)) {
+      return _finishFailure(failure);
+    }
+    await reload();
+    await _refreshNotifications();
+    _setBusy(false);
+    return null;
+  }
+
+  Future<String?> applyNekokoImport(NekokoImportReport report) async {
+    if (_busy) return '当前操作尚未完成，请稍候';
+    _setBusy(true);
+    final result = _importStore.applyNekoko(report);
+    if (result case Err(failure: final failure)) {
+      return _finishFailure(failure);
+    }
+    await reload();
+    await _refreshNotifications();
+    _setBusy(false);
+    return null;
+  }
+
+  /// 开发者模式：幂等写入一组覆盖主要领域关系的示例资料。
+  Future<String?> addDeveloperTestData() async {
+    if (_busy) return '当前操作尚未完成，请稍候';
+    _setBusy(true);
+    final report = _developerSampleReport(
+      DateTime.now().toUtc(),
+      _defaultTimeZoneId,
+    );
+    final result = _importStore.apply(report);
+    if (result case Err(failure: final failure)) {
+      return _finishFailure(failure);
+    }
+    await reload();
+    await _refreshNotifications();
+    _setBusy(false);
+    return null;
+  }
+
+  /// 开发者模式：按选择清空本机数据；任何情况都不删除远端文件。
+  Future<String?> clearDeveloperData({
+    bool clearProfiles = true,
+    bool clearAssets = true,
+    bool clearWebDavConfiguration = false,
+  }) async {
+    if (_busy) return '当前操作尚未完成，请稍候';
+    if (!clearProfiles && !clearAssets && !clearWebDavConfiguration) {
+      return '请至少选择一项要清空的数据';
+    }
+    _setBusy(true);
+    final resetSyncState =
+        clearProfiles || clearAssets || clearWebDavConfiguration;
+    final result = _importStore.clearSelected(
+      clearProfiles: clearProfiles,
+      clearAssets: clearAssets,
+      resetSyncState: resetSyncState,
+    );
+    if (result case Err(failure: final failure)) {
+      return _finishFailure(failure);
+    }
+    try {
+      if (clearProfiles) await _reminderNotifications.cancelAll();
+      if (clearWebDavConfiguration) await _webDav.clearConfiguration();
+    } catch (error) {
+      await reload();
+      _setBusy(false);
+      return '本机清理未完全完成：$error';
+    }
+    if (clearWebDavConfiguration) _webDavConfiguration = null;
+    if (resetSyncState) {
+      _lastSyncReport = null;
+      _syncConflicts = const [];
+      _syncState = const SyncState();
+    }
+    if (clearProfiles) _notificationError = null;
+    await reload();
+    _setBusy(false);
+    return null;
+  }
+
+  Future<String?> recordActivity({
+    required Subscription subscription,
+    required ActivityType type,
+    required DateTime occurredAt,
+    Money? amount,
+  }) async {
+    if (type == ActivityType.balanceChange) {
+      return '余额变动必须从余额管理中记录';
+    }
+    if (_busy) return '当前操作尚未完成，请稍候';
+    _setBusy(true);
+    final record = ActivityRecord(
+      id: _uuid.v4(),
+      subscriptionId: subscription.id,
+      type: type,
+      occurredAt: occurredAt.toUtc(),
+      updatedAt: DateTime.now().toUtc(),
+      amount: amount,
+    );
+    final result = _activityService.record(
+      subscription: subscription,
+      activity: record,
+      updatedAtUtc: DateTime.now().toUtc(),
+    );
+    if (result case Err(failure: final failure)) {
+      return _finishFailure(failure);
+    }
+    await reload();
+    await _refreshNotifications();
+    _setBusy(false);
+    return null;
+  }
+
+  /// 原子更新 Profile 当前余额并留下可同步的余额流水。
+  Future<String?> updateBalance({
+    required Subscription subscription,
+    required Money balance,
+    String? note,
+  }) async {
+    if (_busy) return '当前操作尚未完成，请稍候';
+    final previous = subscription.details.currentBalance;
+    if (previous == balance) return '余额没有变化';
+    final delta = previous == null
+        ? balance
+        : previous.currencyCode == balance.currencyCode
+        ? balance - previous
+        : null;
+    _setBusy(true);
+    final now = DateTime.now().toUtc();
+    final record = ActivityRecord(
+      id: _uuid.v4(),
+      subscriptionId: subscription.id,
+      type: ActivityType.balanceChange,
+      occurredAt: now,
+      updatedAt: now,
+      amount: delta,
+      balanceAfter: balance,
+      note: note?.trim().isEmpty ?? true ? null : note!.trim(),
+    );
+    final result = _activityService.updateBalance(
+      subscription: subscription,
+      activity: record,
+      balance: balance,
+      updatedAtUtc: now,
+    );
+    if (result case Err(failure: final failure)) {
+      return _finishFailure(failure);
+    }
+    await reload();
+    await _refreshNotifications();
+    _setBusy(false);
+    return null;
+  }
+
+  Result<int> _archiveExpiredProfiles(DateTime nowUtc) {
+    final graceDays = _museumAutoArchiveDays;
+    if (graceDays == null) return const Ok(0);
+    final loaded = _subscriptionRepository.listAll();
+    if (loaded case Err(failure: final failure)) return Err(failure);
+    final subscriptions = (loaded as Ok<List<Subscription>>).value;
+    var archived = 0;
+    for (final subscription in subscriptions) {
+      final expiresAt = subscription.lifecycle.serviceExpiresAt;
+      if (subscription.lifecycle.stage != ProfileStage.active ||
+          expiresAt == null ||
+          expiresAt.add(Duration(days: graceDays)).isAfter(nowUtc)) {
+        continue;
+      }
+      final result = _subscriptionReminderService.upsert(
+        subscription: subscription.copyWith(
+          lifecycle: subscription.lifecycle.archive(
+            nowUtc,
+            reason: ProfileArchiveReason.expired,
+          ),
+          updatedAt: nowUtc,
+        ),
+        clock: FixedClock(nowUtc),
+      );
+      if (result case Err(failure: final failure)) return Err(failure);
+      archived++;
+    }
+    return Ok(archived);
+  }
+
+  Future<String?> _mutate(
+    Result<void> Function() operation, {
+    bool refreshReminders = false,
+  }) async {
+    if (_busy) return '当前操作尚未完成，请稍候';
+    _setBusy(true);
+    final result = operation();
+    if (result case Err(failure: final failure)) {
+      return _finishFailure(failure);
+    }
+    await reload();
+    if (refreshReminders) await _refreshNotifications();
+    _setBusy(false);
+    return null;
+  }
+
+  Future<bool> setRemindersEnabled(bool value) async {
+    _notificationError = null;
+    try {
+      if (value) {
+        _notificationPermissionGranted = await _reminderNotifications
+            .requestPermission();
+        if (!_notificationPermissionGranted) {
+          _remindersEnabled = false;
+          await _persistRemindersEnabled(false);
+          notifyListeners();
+          return false;
+        }
+        _remindersEnabled = true;
+        await _persistRemindersEnabled(true);
+        await _refreshNotifications();
+      } else {
+        _remindersEnabled = false;
+        await _persistRemindersEnabled(false);
+        await _reminderNotifications.cancelAll();
+      }
+      notifyListeners();
+      return true;
+    } catch (error) {
+      _notificationError = '通知设置失败：$error';
+      _remindersEnabled = false;
+      await _persistRemindersEnabled(false);
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<void> refreshNotificationPermission({bool reschedule = false}) async {
+    try {
+      _notificationPermissionGranted = await _reminderNotifications
+          .areNotificationsEnabled();
+      if (reschedule) await _refreshNotifications();
+    } catch (error) {
+      _notificationError = '无法读取通知权限：$error';
+      _notificationPermissionGranted = false;
+    }
+    notifyListeners();
+  }
+
+  Future<void> openNotificationSettings() =>
+      _reminderNotifications.openSettings();
+
+  Future<String?> initialNotificationSubscriptionId() =>
+      _reminderNotifications.initialSubscriptionId();
+
+  Future<void> _refreshNotifications() async {
+    _notificationError = null;
+    try {
+      if (!_remindersEnabled || !_notificationPermissionGranted) {
+        await _reminderNotifications.cancelAll();
+        return;
+      }
+      await _reminderNotifications.replaceAll(_subscriptions);
+    } catch (error) {
+      _notificationError = '提醒排程失败：$error';
+    }
+  }
+
+  Future<String?> testWebDav(WebDavConfiguration configuration) async {
+    if (_busy) return '当前操作尚未完成，请稍候';
+    _setBusy(true);
+    try {
+      final result = await _webDav.testConnection(configuration);
+      return switch (result) {
+        Ok() => null,
+        Err(failure: final failure) => _failureMessage(failure),
+      };
+    } catch (error) {
+      return '连接测试失败：$error';
+    } finally {
+      _setBusy(false);
+    }
+  }
+
+  Future<String?> saveWebDavConfiguration(
+    WebDavConfiguration configuration,
+  ) async {
+    try {
+      await _webDav.saveConfiguration(configuration);
+      _webDavConfiguration = configuration;
+      notifyListeners();
+      return null;
+    } catch (error) {
+      return '配置保存失败：$error';
+    }
+  }
+
+  Future<String?> syncWebDav() async {
+    final configuration = _webDavConfiguration;
+    if (configuration == null) return '请先配置 WebDAV';
+    if (_busy) return '当前操作尚未完成，请稍候';
+    _setBusy(true);
+    try {
+      final result = await _webDav.sync(configuration);
+      switch (result) {
+        case Ok(value: final report):
+          _lastSyncReport = report;
+          await reload();
+          _loadSyncConflicts();
+          _loadSyncState();
+          await _refreshNotifications();
+          return null;
+        case Err(failure: final failure):
+          return _failureMessage(failure);
+      }
+    } catch (error) {
+      return '同步失败：$error';
+    } finally {
+      _setBusy(false);
+    }
+  }
+
+  Future<String?> disconnectWebDav() async {
+    try {
+      await _webDav.clearConfiguration();
+      _webDavConfiguration = null;
+      _lastSyncReport = null;
+      notifyListeners();
+      return null;
+    } catch (error) {
+      return '移除配置失败：$error';
+    }
+  }
+
+  void _loadSyncConflicts() {
+    final result = _webDav.listConflicts();
+    if (result case Ok(value: final conflicts)) {
+      _syncConflicts = conflicts;
+    }
+  }
+
+  void _loadSyncState() {
+    final result = _webDav.readState();
+    if (result case Ok(value: final state)) _syncState = state;
+  }
+
+  String _finishFailure(Failure failure) {
+    final message = _failureMessage(failure);
+    _errorMessage = message;
+    _setBusy(false);
+    return message;
+  }
+
+  void clearError() {
+    _errorMessage = null;
+    notifyListeners();
+  }
+
+  void _setBusy(bool value) {
+    _busy = value;
+    notifyListeners();
+  }
+
+  static String _failureMessage(Failure failure) => switch (failure) {
+    StoreError(message: final message) => '本地数据保存失败：$message',
+    AuthError(message: final message) => '认证失败：$message',
+    NetworkError(message: final message) => '网络错误：$message',
+    SchemaError(message: final message) => '数据版本错误：$message',
+    PreconditionFailed() => '远端数据正在被修改，请稍后重试',
+  };
+
+  @override
+  void dispose() {
+    _reminderNotifications.dispose();
+    _closeStore();
+    super.dispose();
+  }
+}
+
+SimHubImportReport _developerSampleReport(DateTime now, String timeZoneId) {
+  const ctExcelId = 'developer-sample-ctexcel';
+  const travelId = 'developer-sample-travel';
+  const mobileId = 'developer-sample-mobile';
+  final createdAt = now.subtract(const Duration(days: 240));
+  final ctExcelActivity = now.subtract(const Duration(days: 36));
+  final mobileActivity = now.subtract(const Duration(days: 171));
+
+  final subscriptions = <Subscription>[
+    Subscription(
+      id: ctExcelId,
+      iccid: '8944000000000000001',
+      number: PhoneNumber('+447700900001'),
+      operator: 'CTExcel UK（测试）',
+      lifecycle: ProfileLifecycle(
+        deviceState: ProfileDeviceState.enabled,
+        serviceExpiresAt: now.add(const Duration(days: 365)),
+        activatedAt: createdAt,
+      ),
+      plan: Plan(
+        name: 'UK 预付费测试套餐',
+        cyclePrice: const Money(minorUnits: 1200, currencyCode: 'GBP'),
+        cycleDays: 30,
+        startDate: now.subtract(const Duration(days: 8)),
+        expiryDate: now.add(const Duration(days: 22)),
+      ),
+      keepAlive: KeepAlive(
+        required: true,
+        cycleDays: 90,
+        lastActivityAt: ctExcelActivity,
+        policy: KeepAlivePolicy(
+          qualifyingActions: const {
+            KeepAliveAction.mobileData,
+            KeepAliveAction.call,
+            KeepAliveAction.sms,
+            KeepAliveAction.topUp,
+          },
+          summary: '测试规则：90 天内产生一次有效使用。',
+        ),
+      ),
+      tags: const ['测试数据', '英国', '主套餐'],
+      appearance: const Appearance(flag: '🇬🇧', cardColorHex: '#2374AB'),
+      details: const SubscriptionDetails(
+        profileName: '英国主号（测试）',
+        countryCode: 'GB',
+        countryName: 'United Kingdom',
+        mcc: '234',
+        mnc: '30',
+        apn: 'everywhere',
+        currentBalance: Money(minorUnits: 850, currencyCode: 'GBP'),
+        affiliateOffers: [
+          AffiliateOffer(
+            id: 'builtin-ctexcel-uk',
+            brand: 'CTExcel UK',
+            category: AffiliateOfferCategory.mobileOperator,
+            url:
+                'https://www.ctexcel.com/uk/buyCard/buyCardPackage/1?recommendCode=RNAFZW',
+            promoCode: 'RNAFZW',
+            note: '英国实体 SIM / 手机号码推荐。',
+            isBuiltIn: true,
+          ),
+        ],
+        orderIndex: 0,
+      ),
+      timeZoneId: timeZoneId,
+      createdAt: createdAt,
+      updatedAt: now,
+    ),
+    Subscription(
+      id: travelId,
+      iccid: '8944000000000000002',
+      number: const PhoneNumber.unknown(),
+      operator: '旅行数据 eSIM（测试）',
+      lifecycle: ProfileLifecycle(
+        stage: ProfileStage.pendingActivation,
+        activationDeadline: now.add(const Duration(days: 180)),
+        activationRequirements: '测试要求：购买后 180 天内激活，首次下载需要联网。',
+      ),
+      activation: LpaActivation(
+        smdpAddress: 'rsp.example.test',
+        matchingId: 'IESIM-TEST-PROFILE',
+      ),
+      plan: Plan(
+        name: '欧洲 10 GB / 30 天',
+        cyclePrice: const Money(minorUnits: 1590, currencyCode: 'EUR'),
+        cycleDays: 30,
+        startDate: now.subtract(const Duration(days: 3)),
+        expiryDate: now.add(const Duration(days: 27)),
+      ),
+      keepAlive: KeepAlive.notRequired(),
+      tags: const ['测试数据', '无号码', '旅行'],
+      appearance: const Appearance(flag: '🇪🇺', cardColorHex: '#6554C0'),
+      details: const SubscriptionDetails(
+        profileName: '欧洲旅行 Profile（测试）',
+        countryCode: 'DE',
+        countryName: 'Germany',
+        mcc: '262',
+        mnc: '01',
+        apn: 'internet',
+        orderIndex: 1,
+      ),
+      timeZoneId: timeZoneId,
+      createdAt: now.subtract(const Duration(days: 3)),
+      updatedAt: now,
+    ),
+    Subscription(
+      id: mobileId,
+      iccid: '8986000000000000003',
+      number: PhoneNumber('+8613800000001'),
+      operator: '中国移动（测试）',
+      lifecycle: ProfileLifecycle(
+        stage: ProfileStage.museum,
+        deviceState: ProfileDeviceState.disabled,
+        serviceExpiresAt: now.subtract(const Duration(days: 30)),
+        activatedAt: createdAt,
+        archivedAt: now.subtract(const Duration(days: 10)),
+        archiveReason: ProfileArchiveReason.expired,
+      ),
+      plan: Plan(name: '长期保号测试卡', isLongTerm: true),
+      keepAlive: KeepAlive(
+        required: true,
+        cycleDays: 180,
+        lastActivityAt: mobileActivity,
+        policy: KeepAlivePolicy(
+          qualifyingActions: const {
+            KeepAliveAction.mobileData,
+            KeepAliveAction.call,
+            KeepAliveAction.sms,
+            KeepAliveAction.topUp,
+          },
+          summary: '测试规则：用于验证临期状态和提醒。',
+        ),
+      ),
+      tags: const ['测试数据', '临期', '实体 eUICC'],
+      appearance: const Appearance(flag: '🇨🇳', cardColorHex: '#E36B3D'),
+      details: const SubscriptionDetails(
+        profileName: '中国保号 Profile（测试）',
+        countryCode: 'CN',
+        countryName: 'China',
+        mcc: '460',
+        mnc: '00',
+        apn: 'cmnet',
+        orderIndex: 2,
+      ),
+      timeZoneId: timeZoneId,
+      createdAt: createdAt,
+      updatedAt: now,
+    ),
+  ];
+
+  final activities = <ActivityRecord>[
+    ActivityRecord(
+      id: 'developer-sample-activity-ctexcel-balance',
+      subscriptionId: ctExcelId,
+      type: ActivityType.balanceChange,
+      occurredAt: now.subtract(const Duration(days: 2)),
+      updatedAt: now,
+      amount: const Money(minorUnits: 850, currencyCode: 'GBP'),
+      balanceAfter: const Money(minorUnits: 850, currencyCode: 'GBP'),
+      note: '测试余额初始化',
+    ),
+    ActivityRecord(
+      id: 'developer-sample-activity-ctexcel',
+      subscriptionId: ctExcelId,
+      type: ActivityType.mobileData,
+      occurredAt: ctExcelActivity,
+      updatedAt: now,
+    ),
+    ActivityRecord(
+      id: 'developer-sample-activity-mobile',
+      subscriptionId: mobileId,
+      type: ActivityType.topUp,
+      occurredAt: mobileActivity,
+      updatedAt: now,
+      amount: const Money(minorUnits: 1000, currencyCode: 'CNY'),
+    ),
+  ];
+
+  final device = DeviceAsset(
+    id: 'developer-sample-device',
+    name: 'Pixel 测试机',
+    kind: DeviceKind.phone,
+    brand: 'Google',
+    note: '由开发者模式生成，可安全删除。',
+    region: 'Global',
+    usage: '测试',
+    simCapability: SimCapability.physicalPlusEsim,
+    supportsSaRoaming: true,
+    createdAt: createdAt,
+    updatedAt: now,
+  );
+  final removable = RemovableEuiccCard(
+    id: 'developer-sample-removable-card',
+    name: '测试可拆卸 eUICC',
+    note: '用于测试卡片迁移。',
+    createdAt: createdAt,
+    updatedAt: now,
+  );
+  final embedded = EmbeddedEuiccCard(
+    id: 'developer-sample-embedded-card',
+    name: 'Pixel 内置 eSIM',
+    embeddedDeviceId: device.id,
+    createdAt: createdAt,
+    updatedAt: now,
+  );
+  final removableEid = Euicc(
+    id: 'developer-sample-removable-eid',
+    cardId: removable.id,
+    value: '89049032000000000000000000000001',
+    label: '可拆卸 EID（测试）',
+    createdAt: createdAt,
+    updatedAt: now,
+  );
+  final embeddedEid = Euicc(
+    id: 'developer-sample-embedded-eid',
+    cardId: embedded.id,
+    value: '89044045000000000000000000000002',
+    label: '内置 EID（测试）',
+    createdAt: createdAt,
+    updatedAt: now,
+  );
+
+  return SimHubImportReport(
+    subscriptions: subscriptions,
+    activityRecords: activities,
+    issues: const [],
+    sourceRecordCount: subscriptions.length,
+    assets: AssetInventory(
+      devices: [device],
+      cards: [removable, embedded],
+      slots: [
+        SimSlot(
+          id: 'developer-sample-slot-physical',
+          deviceId: device.id,
+          label: 'SIM 1',
+          kind: SimSlotKind.physical,
+          position: 0,
+          cardId: removable.id,
+          createdAt: createdAt,
+          updatedAt: now,
+        ),
+        SimSlot(
+          id: 'developer-sample-slot-embedded',
+          deviceId: device.id,
+          label: '内置 eSIM',
+          kind: SimSlotKind.embeddedEuicc,
+          position: 1,
+          cardId: embedded.id,
+          createdAt: createdAt,
+          updatedAt: now,
+        ),
+      ],
+      eids: [removableEid, embeddedEid],
+      profiles: [
+        EsimProfile(
+          id: 'developer-sample-profile-mobile',
+          eidId: removableEid.id,
+          iccid: subscriptions[2].iccid,
+          operatorName: subscriptions[2].operator,
+          nickname: 't:测试实体卡',
+          subscriptionId: mobileId,
+          createdAt: createdAt,
+          updatedAt: now,
+        ),
+        EsimProfile(
+          id: 'developer-sample-profile-ctexcel',
+          eidId: embeddedEid.id,
+          iccid: subscriptions[0].iccid,
+          operatorName: subscriptions[0].operator,
+          nickname: 't:测试主卡',
+          subscriptionId: ctExcelId,
+          createdAt: createdAt,
+          updatedAt: now,
+        ),
+        EsimProfile(
+          id: 'developer-sample-profile-travel',
+          eidId: embeddedEid.id,
+          iccid: subscriptions[1].iccid,
+          operatorName: subscriptions[1].operator,
+          nickname: 't:测试旅行卡',
+          subscriptionId: travelId,
+          createdAt: now.subtract(const Duration(days: 3)),
+          updatedAt: now,
+        ),
+      ],
+    ),
+  );
+}

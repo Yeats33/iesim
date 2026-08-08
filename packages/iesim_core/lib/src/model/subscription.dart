@@ -1,7 +1,10 @@
 import 'appearance.dart';
 import 'keep_alive.dart';
 import 'plan.dart';
+import 'profile_lifecycle.dart';
+import 'subscription_details.dart';
 import '../value/phone_number.dart';
+import '../interop/lpa_activation.dart';
 
 /// 订阅聚合根。
 ///
@@ -22,6 +25,9 @@ class Subscription {
   /// 运营商名称。
   final String? operator;
 
+  /// eSIM QR / LPA 导入的激活凭据。UI 必须遮盖 [LpaActivation.matchingId]。
+  final LpaActivation? activation;
+
   final Plan plan;
 
   final KeepAlive keepAlive;
@@ -30,6 +36,11 @@ class Subscription {
   final List<String> tags;
 
   final Appearance appearance;
+
+  final SubscriptionDetails details;
+
+  /// Profile 的业务生命周期；与设备侧 Profile 是否 enabled 相互独立。
+  final ProfileLifecycle lifecycle;
 
   /// IANA 基准时区标识，如 Asia/Shanghai（spec §4.3）。
   final String timeZoneId;
@@ -45,14 +56,17 @@ class Subscription {
     this.iccid,
     required this.number,
     this.operator,
+    this.activation,
     required this.plan,
     required this.keepAlive,
     List<String>? tags,
     this.appearance = const Appearance(),
+    this.details = const SubscriptionDetails(),
+    this.lifecycle = const ProfileLifecycle(),
     required this.timeZoneId,
     required this.createdAt,
     required this.updatedAt,
-  })  : tags = List.unmodifiable(tags ?? const []) {
+  }) : tags = List.unmodifiable(tags ?? const []) {
     if (id.isEmpty) {
       throw ArgumentError.value(id, 'id', '不能为空');
     }
@@ -72,27 +86,32 @@ class Subscription {
     String? iccid,
     PhoneNumber? number,
     String? operator,
+    LpaActivation? activation,
     Plan? plan,
     KeepAlive? keepAlive,
     List<String>? tags,
     Appearance? appearance,
+    SubscriptionDetails? details,
+    ProfileLifecycle? lifecycle,
     String? timeZoneId,
     DateTime? createdAt,
     DateTime? updatedAt,
-  }) =>
-      Subscription(
-        id: id ?? this.id,
-        iccid: iccid ?? this.iccid,
-        number: number ?? this.number,
-        operator: operator ?? this.operator,
-        plan: plan ?? this.plan,
-        keepAlive: keepAlive ?? this.keepAlive,
-        tags: tags ?? this.tags,
-        appearance: appearance ?? this.appearance,
-        timeZoneId: timeZoneId ?? this.timeZoneId,
-        createdAt: createdAt ?? this.createdAt,
-        updatedAt: updatedAt ?? this.updatedAt,
-      );
+  }) => Subscription(
+    id: id ?? this.id,
+    iccid: iccid ?? this.iccid,
+    number: number ?? this.number,
+    operator: operator ?? this.operator,
+    activation: activation ?? this.activation,
+    plan: plan ?? this.plan,
+    keepAlive: keepAlive ?? this.keepAlive,
+    tags: tags ?? this.tags,
+    appearance: appearance ?? this.appearance,
+    details: details ?? this.details,
+    lifecycle: lifecycle ?? this.lifecycle,
+    timeZoneId: timeZoneId ?? this.timeZoneId,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
 
   @override
   bool operator ==(Object other) =>
@@ -102,10 +121,13 @@ class Subscription {
           other.iccid == iccid &&
           other.number == number &&
           other.operator == operator &&
+          other.activation == activation &&
           other.plan == plan &&
           other.keepAlive == keepAlive &&
           _listEquals(other.tags, tags) &&
           other.appearance == appearance &&
+          other.details == details &&
+          other.lifecycle == lifecycle &&
           other.timeZoneId == timeZoneId &&
           other.createdAt == createdAt &&
           other.updatedAt == updatedAt;
@@ -120,16 +142,19 @@ class Subscription {
 
   @override
   int get hashCode => Object.hash(
-        id,
-        iccid,
-        number,
-        operator,
-        plan,
-        keepAlive,
-        Object.hashAll(tags),
-        appearance,
-        timeZoneId,
-        createdAt,
-        updatedAt,
-      );
+    id,
+    iccid,
+    number,
+    operator,
+    activation,
+    plan,
+    keepAlive,
+    Object.hashAll(tags),
+    appearance,
+    details,
+    lifecycle,
+    timeZoneId,
+    createdAt,
+    updatedAt,
+  );
 }

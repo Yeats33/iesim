@@ -35,3 +35,41 @@ class StoreError extends Failure {
   @override
   String toString() => 'StoreError($message)';
 }
+
+/// WebDAV 用户名、密码或服务端授权失败。
+class AuthError extends Failure {
+  final String message;
+
+  const AuthError(this.message);
+
+  @override
+  String toString() => 'AuthError($message)';
+}
+
+/// 网络不可达、超时或服务端异常。
+class NetworkError extends Failure {
+  final String message;
+
+  const NetworkError(this.message);
+
+  @override
+  String toString() => 'NetworkError($message)';
+}
+
+/// 远端快照格式或版本不兼容。
+class SchemaError extends Failure {
+  final String message;
+
+  const SchemaError(this.message);
+
+  @override
+  String toString() => 'SchemaError($message)';
+}
+
+/// ETag 已变化；同步引擎捕获后重新读取合并，不直接展示给用户。
+class PreconditionFailed extends Failure {
+  const PreconditionFailed();
+
+  @override
+  String toString() => 'PreconditionFailed()';
+}

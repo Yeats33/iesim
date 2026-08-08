@@ -50,15 +50,14 @@ class Plan {
     DateTime? startDate,
     DateTime? expiryDate,
     bool? isLongTerm,
-  }) =>
-      Plan(
-        name: name ?? this.name,
-        cyclePrice: cyclePrice ?? this.cyclePrice,
-        cycleDays: cycleDays ?? this.cycleDays,
-        startDate: startDate ?? this.startDate,
-        expiryDate: expiryDate ?? this.expiryDate,
-        isLongTerm: isLongTerm ?? this.isLongTerm,
-      );
+  }) => Plan(
+    name: name ?? this.name,
+    cyclePrice: cyclePrice ?? this.cyclePrice,
+    cycleDays: cycleDays ?? this.cycleDays,
+    startDate: startDate ?? this.startDate,
+    expiryDate: expiryDate ?? this.expiryDate,
+    isLongTerm: isLongTerm ?? this.isLongTerm,
+  );
 
   @override
   bool operator ==(Object other) =>
@@ -72,6 +71,12 @@ class Plan {
           other.isLongTerm == isLongTerm;
 
   @override
-  int get hashCode =>
-      Object.hash(name, cyclePrice, cycleDays, startDate, expiryDate, isLongTerm);
+  int get hashCode => Object.hash(
+    name,
+    cyclePrice,
+    cycleDays,
+    startDate,
+    expiryDate,
+    isLongTerm,
+  );
 }

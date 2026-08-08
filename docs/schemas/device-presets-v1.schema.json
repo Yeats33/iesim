@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Yeats33/iesim/blob/main/docs/schemas/device-presets-v1.schema.json",
+  "title": "iesim device preset catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "catalogVersion", "updatedAt", "devices"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "catalogVersion": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "devices": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": { "$ref": "#/$defs/device" }
+    }
+  },
+  "$defs": {
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "brand", "model", "kind", "simCapability"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{1,79}$"
+        },
+        "brand": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "model": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "variant": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "kind": {
+          "enum": [
+            "phone",
+            "mobileRouter",
+            "tablet",
+            "watch",
+            "laptop",
+            "esimWriter",
+            "other"
+          ]
+        },
+        "region": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "note": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "simCapability": {
+          "enum": [
+            "physicalOnly",
+            "esimOnly",
+            "physicalPlusEsim",
+            "dualPhysical",
+            "multiEsim",
+            "unknown"
+          ]
+        },
+        "supportsSaRoaming": { "type": "boolean" },
+        "slots": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "kind"],
+            "properties": {
+              "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+              "kind": { "enum": ["physical", "embeddedEuicc"] }
+            }
+          }
+        },
+        "aliases": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "type": "string", "minLength": 1, "maxLength": 120 }
+        }
+      }
+    }
+  }
+}

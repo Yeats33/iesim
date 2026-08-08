@@ -20,14 +20,8 @@ void main() {
     });
 
     test('拒绝非 UTC 的日期', () {
-      expect(
-        () => Plan(startDate: DateTime(2026, 8, 1)),
-        throwsArgumentError,
-      );
-      expect(
-        () => Plan(expiryDate: DateTime(2026, 8, 1)),
-        throwsArgumentError,
-      );
+      expect(() => Plan(startDate: DateTime(2026, 8, 1)), throwsArgumentError);
+      expect(() => Plan(expiryDate: DateTime(2026, 8, 1)), throwsArgumentError);
     });
 
     test('copyWith 仅覆盖指定字段', () {

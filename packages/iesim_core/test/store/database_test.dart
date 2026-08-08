@@ -1,16 +1,18 @@
 import 'dart:io';
 
+import 'package:iesim_core/src/store/database.dart';
 import 'package:sqlite3/sqlite3.dart';
 import 'package:test/test.dart';
-import 'package:iesim_core/src/store/database.dart';
 
 void main() {
   group('openIesimStore / createSchema', () {
-    test('内存库建表后七张业务表齐备', () {
+    test('新的开发基线一次建立全部业务表', () {
       final db = openIesimStore(':memory:');
       final names = db
-          .select("SELECT name FROM sqlite_master WHERE type='table' "
-              "AND name NOT LIKE 'sqlite_%'")
+          .select(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name NOT LIKE 'sqlite_%'",
+          )
           .map((row) => row['name'] as String)
           .toSet();
       expect(
@@ -23,25 +25,95 @@ void main() {
           'cards',
           'eids',
           'profiles',
+          'asset_events',
+          'sync_tombstones',
+          'sync_state',
+          'sync_conflicts',
+          'scheduled_reminders',
         ]),
       );
       db.close();
     });
 
-    test('user_version 为 1，为未来迁移留锚点', () {
+    test('内部数据库从当前最佳结构重新编号为 v1', () {
       final db = openIesimStore(':memory:');
-      expect(db.select('PRAGMA user_version').single.values.first, equals(1));
+      expect(
+        db.select('PRAGMA user_version').single.values.first,
+        iesimDatabaseSchemaVersion,
+      );
+      final columns = db
+          .select('PRAGMA table_info(subscriptions)')
+          .map((row) => row['name']);
+      expect(
+        columns,
+        containsAll([
+          'smdp_address',
+          'activation_code',
+          'keepalive_policy_json',
+          'mcc',
+          'mnc',
+          'apn',
+          'profile_name',
+          'profile_class_code',
+          'installed_profile_size_bytes',
+        ]),
+      );
       db.close();
     });
 
-    test('createSchema 幂等，重复调用不报错', () {
-      final db = openIesimStore(':memory:');
+    test('开发期旧编号直接清空并重建，不执行迁移', () {
+      final db = sqlite3.openInMemory();
+      db.execute('''
+CREATE TABLE subscriptions (id TEXT PRIMARY KEY, number TEXT NOT NULL);
+INSERT INTO subscriptions (id, number) VALUES ('old', '10086');
+PRAGMA user_version = 8;
+''');
+
       createSchema(db);
-      createSchema(db);
+
+      expect(db.select('SELECT * FROM subscriptions'), isEmpty);
       expect(
-        db.select("SELECT COUNT(*) FROM sqlite_master WHERE type='table'"),
-        isNotEmpty,
+        db.select('PRAGMA user_version').single.values.first,
+        iesimDatabaseSchemaVersion,
       );
+      expect(
+        db.select('PRAGMA table_info(subscriptions)').map((row) => row['name']),
+        containsAll(['mcc', 'mnc', 'apn', 'keepalive_policy_json']),
+      );
+      db.close();
+    });
+
+    test('同为 v1 但结构属于早期开发版时也直接重建', () {
+      final db = sqlite3.openInMemory();
+      db.execute('''
+CREATE TABLE subscriptions (id TEXT PRIMARY KEY, number TEXT NOT NULL);
+INSERT INTO subscriptions (id, number) VALUES ('old-v1', '10010');
+PRAGMA user_version = 1;
+''');
+
+      createSchema(db);
+
+      expect(db.select('SELECT * FROM subscriptions'), isEmpty);
+      expect(
+        db.select('PRAGMA table_info(profiles)').map((row) => row['name']),
+        containsAll(['nickname', 'subscription_id', 'updated_at']),
+      );
+      db.close();
+    });
+
+    test('createSchema 对当前 v1 幂等，不会清空有效数据', () {
+      final db = openIesimStore(':memory:');
+      db.execute(
+        "INSERT INTO subscriptions "
+        "(id, number, keepalive_required, keepalive_confidence, "
+        "plan_is_long_term, tags_json, time_zone_id, created_at, updated_at) "
+        "VALUES ('s1', '', 0, 'confirmed', 0, '[]', 'UTC', "
+        "'2026-08-08T00:00:00.000Z', '2026-08-08T00:00:00.000Z')",
+      );
+
+      createSchema(db);
+
+      expect(db.select('SELECT id FROM subscriptions').single['id'], 's1');
       db.close();
     });
 
@@ -49,15 +121,17 @@ void main() {
       final db = openIesimStore(':memory:');
       expect(
         () => db.execute(
-          "INSERT INTO activity_records (id, subscription_id, type, occurred_at) "
-          "VALUES ('a', 'no-such-sub', 'topUp', '2026-08-07T00:00:00.000Z')",
+          "INSERT INTO activity_records "
+          "(id, subscription_id, type, occurred_at, updated_at) "
+          "VALUES ('a', 'no-such-sub', 'topUp', "
+          "'2026-08-07T00:00:00.000Z', '2026-08-07T00:00:00.000Z')",
         ),
         throwsA(isA<SqliteException>()),
       );
       db.close();
     });
 
-    test('文件库可持久化：关闭重开后数据仍在', () {
+    test('当前 v1 文件库关闭重开后数据仍在', () {
       final dir = Directory.systemTemp.createTempSync('iesim_store_test');
       final path = '${dir.path}/store.sqlite';
       try {
@@ -65,15 +139,15 @@ void main() {
         db.execute(
           "INSERT INTO subscriptions "
           "(id, number, keepalive_required, keepalive_confidence, "
-          " plan_is_long_term, tags_json, time_zone_id, created_at, updated_at) "
+          "plan_is_long_term, tags_json, time_zone_id, created_at, updated_at) "
           "VALUES ('s1', '13800000000', 0, 'confirmed', 0, '[]', "
-          " 'Asia/Shanghai', '2026-08-07T00:00:00.000Z', '2026-08-07T00:00:00.000Z')",
+          "'Asia/Shanghai', '2026-08-07T00:00:00.000Z', "
+          "'2026-08-07T00:00:00.000Z')",
         );
         db.close();
 
         db = openIesimStore(path);
-        final rows = db.select('SELECT id FROM subscriptions');
-        expect(rows.single['id'], equals('s1'));
+        expect(db.select('SELECT id FROM subscriptions').single['id'], 's1');
         db.close();
       } finally {
         dir.deleteSync(recursive: true);

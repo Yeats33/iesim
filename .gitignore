@@ -2,7 +2,10 @@
 build/
 .packages
 pubspec.lock
+!app/pubspec.lock
+coverage/
 *.iml
 .idea/
 .DS_Store
+.omc/
 .superpowers/

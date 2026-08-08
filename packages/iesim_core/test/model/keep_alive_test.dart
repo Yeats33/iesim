@@ -1,5 +1,6 @@
 import 'package:test/test.dart';
 import 'package:iesim_core/src/model/keep_alive.dart';
+import 'package:iesim_core/src/model/activity_record.dart';
 
 void main() {
   group('KeepAlive', () {
@@ -61,8 +62,11 @@ void main() {
       );
       expect(confirmed.confidence, equals(DataConfidence.confirmed));
       expect(confirmed.lastActivityAt, equals(DateTime.utc(2026, 8, 7)));
-      expect(inferred.confidence, equals(DataConfidence.inferred),
-          reason: '原实例不可被修改');
+      expect(
+        inferred.confidence,
+        equals(DataConfidence.inferred),
+        reason: '原实例不可被修改',
+      );
     });
 
     test('copyWith 不带参数返回等价实例', () {
@@ -108,6 +112,41 @@ void main() {
         confidence: DataConfidence.confirmed,
       );
       expect(a, isNot(equals(KeepAlive.notRequired())));
+    });
+
+    test('复杂策略可表达动作集合、附加条件与官网来源', () {
+      final policy = KeepAlivePolicy(
+        qualifyingActions: const {
+          KeepAliveAction.mobileData,
+          KeepAliveAction.topUp,
+        },
+        summary: '使用流量或充值可重置周期',
+        constraints: [
+          KeepAliveConstraint(
+            kind: KeepAliveConstraintKind.firstUse,
+            title: '首次使用',
+            details: '在服务区完成首次使用',
+            withinDays: 10,
+            regions: const ['英国', '欧盟'],
+          ),
+        ],
+        presetId: 'carrier-a',
+        sourceLabel: '运营商官网',
+        sourceUrl: 'https://example.com/terms',
+        sourceCheckedAt: DateTime.utc(2026, 8, 8),
+      );
+
+      expect(policy.accepts(ActivityType.mobileData), isTrue);
+      expect(policy.accepts(ActivityType.topUp), isTrue);
+      expect(policy.accepts(ActivityType.call), isFalse);
+      expect(KeepAlivePolicy.fromJson(policy.toJson()), equals(policy));
+    });
+
+    test('拒绝没有任何有效动作的策略', () {
+      expect(
+        () => KeepAlivePolicy(qualifyingActions: const {}),
+        throwsFormatException,
+      );
     });
   });
 }

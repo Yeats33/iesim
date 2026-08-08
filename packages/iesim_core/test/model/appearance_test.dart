@@ -15,7 +15,10 @@ void main() {
     test('copyWith 仅覆盖指定字段', () {
       const a = Appearance(flag: '🇨🇳');
       expect(a.copyWith(cardColorHex: '#0a84ff').flag, equals('🇨🇳'));
-      expect(a.copyWith(cardColorHex: '#0a84ff').cardColorHex, equals('#0a84ff'));
+      expect(
+        a.copyWith(cardColorHex: '#0a84ff').cardColorHex,
+        equals('#0a84ff'),
+      );
     });
 
     test('相同字段视为相等', () {

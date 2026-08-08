@@ -88,7 +88,7 @@ iesim/
 - Consumes: 无（首个任务）
 - Produces: 可运行 `dart test` 的包结构；库入口 `package:iesim_core/iesim_core.dart`
 
-- [ ] **Step 1: 创建包目录与 pubspec**
+- [x] **Step 1: 创建包目录与 pubspec**
 
 ```bash
 mkdir -p ~/code/Yeats33/iesim/packages/iesim_core/lib/src
@@ -114,7 +114,7 @@ dev_dependencies:
   lints: ^5.0.0
 ```
 
-- [ ] **Step 2: 写入 lint 配置**
+- [x] **Step 2: 写入 lint 配置**
 
 写入 `packages/iesim_core/analysis_options.yaml`：
 
@@ -129,7 +129,7 @@ linter:
     - always_declare_return_types
 ```
 
-- [ ] **Step 3: 写入库入口占位与冒烟测试**
+- [x] **Step 3: 写入库入口占位与冒烟测试**
 
 写入 `packages/iesim_core/lib/iesim_core.dart`：
 
@@ -150,7 +150,7 @@ void main() {
 }
 ```
 
-- [ ] **Step 4: 拉取依赖并运行测试**
+- [x] **Step 4: 拉取依赖并运行测试**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -160,7 +160,7 @@ dart test
 
 Expected: 1 个测试通过。若 `dart` 命令不存在，先确认 `~/flutter/bin` 已加入 PATH。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd ~/code/Yeats33/iesim
@@ -181,7 +181,7 @@ git commit -m "chore: 初始化 iesim_core 包骨架"
 - Consumes: 无
 - Produces: `Money({required int minorUnits, required String currencyCode})`，含 `operator ==`、`hashCode`、`copyWith`、`Money.zero(String currencyCode)`，以及跨币种相加时抛出的 `CurrencyMismatchError`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 写入 `packages/iesim_core/test/value/money_test.dart`：
 
@@ -234,7 +234,7 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -243,7 +243,7 @@ dart test test/value/money_test.dart
 
 Expected: FAIL，报错 `Error: Couldn't resolve the package 'iesim_core'` 或找不到 `money.dart`。
 
-- [ ] **Step 3: 实现 Money**
+- [x] **Step 3: 实现 Money**
 
 写入 `packages/iesim_core/lib/src/value/money.dart`：
 
@@ -317,7 +317,7 @@ class Money {
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -326,7 +326,7 @@ dart test test/value/money_test.dart
 
 Expected: 6 个测试全部 PASS。
 
-- [ ] **Step 5: 导出并提交**
+- [x] **Step 5: 导出并提交**
 
 将 `packages/iesim_core/lib/iesim_core.dart` 改为：
 
@@ -360,7 +360,7 @@ git commit -m "feat: 添加 Money 值对象，金额以最小货币单位整数�
 
 **为什么需要**：业务逻辑若直接调用 `DateTime.now()`，保号状态测试将无法构造「距截止还有 3 天」这类场景，只能依赖真实时间，测试不可重现。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 写入 `packages/iesim_core/test/time/clock_test.dart`：
 
@@ -391,7 +391,7 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -400,7 +400,7 @@ dart test test/time/clock_test.dart
 
 Expected: FAIL，找不到 `clock.dart`。
 
-- [ ] **Step 3: 实现 Clock**
+- [x] **Step 3: 实现 Clock**
 
 写入 `packages/iesim_core/lib/src/time/clock.dart`：
 
@@ -440,7 +440,7 @@ class FixedClock extends Clock {
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -449,7 +449,7 @@ dart test test/time/clock_test.dart
 
 Expected: 3 个测试全部 PASS。
 
-- [ ] **Step 5: 导出并提交**
+- [x] **Step 5: 导出并提交**
 
 在 `packages/iesim_core/lib/iesim_core.dart` 追加：
 
@@ -480,7 +480,7 @@ git commit -m "feat: 添加可注入时钟，使依赖时间的逻辑可测"
 
 **核心规则**：剩余天数是「翻多少页日历」，不是「相差多少小时除以 24」。夏令时切换日只有 23 或 25 小时，用时长相除会得出错误天数。因此实现必须先在目标时区取出年月日，再做纯日期减法。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 写入 `packages/iesim_core/test/time/calendar_test.dart`：
 
@@ -567,7 +567,7 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -576,7 +576,7 @@ dart test test/time/calendar_test.dart
 
 Expected: FAIL，找不到 `calendar.dart`。
 
-- [ ] **Step 3: 实现 ZonedCalendar**
+- [x] **Step 3: 实现 ZonedCalendar**
 
 写入 `packages/iesim_core/lib/src/time/calendar.dart`：
 
@@ -649,7 +649,7 @@ class ZonedCalendar {
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -658,7 +658,7 @@ dart test test/time/calendar_test.dart
 
 Expected: 9 个测试全部 PASS。若 `Pacific/Kiritimati` 或夏令时用例失败，先确认 `initializeIesimTimeZones()` 已在 `setUpAll` 中调用。
 
-- [ ] **Step 5: 导出并提交**
+- [x] **Step 5: 导出并提交**
 
 在 `packages/iesim_core/lib/iesim_core.dart` 追加：
 
@@ -687,7 +687,7 @@ git commit -m "feat: 添加基准时区日历日运算，消除跨时区与夏�
 - Consumes: 无
 - Produces: `enum DataConfidence { confirmed, inferred }`；`KeepAlive({required bool required, int? cycleDays, DateTime? lastActivityAt, DataConfidence confidence})`，含 `copyWith`、`KeepAlive.notRequired()`、`KeepAlive.inferredFrom(DateTime createdAtUtc, int cycleDays)`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 写入 `packages/iesim_core/test/model/keep_alive_test.dart`：
 
@@ -762,7 +762,7 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -771,7 +771,7 @@ dart test test/model/keep_alive_test.dart
 
 Expected: FAIL，找不到 `keep_alive.dart`。
 
-- [ ] **Step 3: 实现 KeepAlive**
+- [x] **Step 3: 实现 KeepAlive**
 
 写入 `packages/iesim_core/lib/src/model/keep_alive.dart`：
 
@@ -867,7 +867,7 @@ class KeepAlive {
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -876,7 +876,7 @@ dart test test/model/keep_alive_test.dart
 
 Expected: 6 个测试全部 PASS。
 
-- [ ] **Step 5: 导出并提交**
+- [x] **Step 5: 导出并提交**
 
 在 `packages/iesim_core/lib/iesim_core.dart` 追加：
 
@@ -906,7 +906,7 @@ git commit -m "feat: 添加 KeepAlive 模型与数据可信度标记"
 - Consumes: `KeepAlive`、`DataConfidence`（Task 5）；`Clock`、`FixedClock`（Task 3）；`ZonedCalendar`、`initializeIesimTimeZones`（Task 4）
 - Produces: sealed 类 `KeepAliveStatus` 及其子类 `NotRequired`、`Safe`、`DueSoon`、`Overdue`、`Unknown`；类 `KeepAliveEvaluator({required Clock clock, int dueSoonThresholdDays = 7})` 含方法 `KeepAliveStatus evaluate(KeepAlive keepAlive, String timeZoneId)`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 写入 `packages/iesim_core/test/keepalive/evaluator_test.dart`：
 
@@ -1044,7 +1044,7 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -1053,7 +1053,7 @@ dart test test/keepalive/evaluator_test.dart
 
 Expected: FAIL，找不到 `evaluator.dart` 与 `status.dart`。
 
-- [ ] **Step 3: 实现状态类型**
+- [x] **Step 3: 实现状态类型**
 
 写入 `packages/iesim_core/lib/src/keepalive/status.dart`：
 
@@ -1105,7 +1105,7 @@ class Unknown extends KeepAliveStatus {
 }
 ```
 
-- [ ] **Step 4: 实现判定逻辑**
+- [x] **Step 4: 实现判定逻辑**
 
 写入 `packages/iesim_core/lib/src/keepalive/evaluator.dart`：
 
@@ -1158,7 +1158,7 @@ class KeepAliveEvaluator {
 }
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+- [x] **Step 5: 运行测试确认通过**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -1167,7 +1167,7 @@ dart test test/keepalive/evaluator_test.dart
 
 Expected: 10 个测试全部 PASS。若「距截止 30 天」用例算出 29 或 31，检查 `ZonedCalendar.addDays` 是否在目标时区推进日历日而非直接加 `Duration`。
 
-- [ ] **Step 6: 全量测试与覆盖率**
+- [x] **Step 6: 全量测试与覆盖率**
 
 ```bash
 cd ~/code/Yeats33/iesim/packages/iesim_core
@@ -1177,7 +1177,7 @@ dart analyze
 
 Expected: 全部测试通过，`dart analyze` 无 issue。
 
-- [ ] **Step 7: 导出并提交**
+- [x] **Step 7: 导出并提交**
 
 在 `packages/iesim_core/lib/iesim_core.dart` 追加：
 

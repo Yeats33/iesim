@@ -16,8 +16,7 @@ void main() {
 
   group('KeepAliveEvaluator', () {
     test('长期卡返回 NotRequired', () {
-      final status =
-          evaluatorAt(now).evaluate(KeepAlive.notRequired(), zone);
+      final status = evaluatorAt(now).evaluate(KeepAlive.notRequired(), zone);
       expect(status, isA<NotRequired>());
     });
 

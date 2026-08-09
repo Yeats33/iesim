@@ -73,6 +73,9 @@ jobs:
       - name: Resolve dependencies
         working-directory: app
         run: flutter pub get
+      - name: Resolve core dependencies
+        working-directory: packages/iesim_core
+        run: dart pub get
       - name: Analyze core
         working-directory: packages/iesim_core
         run: dart analyze

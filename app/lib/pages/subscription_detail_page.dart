@@ -9,6 +9,7 @@ import '../widgets/operator_identity_line.dart';
 import '../widgets/section_card.dart';
 import '../widgets/status_badge.dart';
 import 'affiliate_management_page.dart';
+import 'app_binding_management_page.dart';
 import 'balance_management_page.dart';
 import 'subscription_form_page.dart';
 
@@ -173,6 +174,44 @@ class SubscriptionDetailPage extends StatelessWidget {
                       ),
                     ),
                     subtitle: const Text('余额与流水在同一个事务中保存'),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SectionCard(
+                  title: '号码绑定',
+                  subtitle: '号码在哪些 App 中用于登录、验证或恢复',
+                  trailing: TextButton.icon(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => AppBindingManagementPage(
+                          subscriptionId: subscription.id,
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.tune_rounded),
+                    label: const Text('管理'),
+                  ),
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const CircleAvatar(
+                      child: Icon(Icons.app_registration_rounded),
+                    ),
+                    title: Text(
+                      subscription.details.appBindings.isEmpty
+                          ? '尚未记录绑定'
+                          : '${subscription.details.appBindings.length} 个 App 绑定',
+                    ),
+                    subtitle: Text(
+                      subscription.details.appBindings.isEmpty
+                          ? '可从 WhatsApp 预设开始，或添加自定义 App'
+                          : subscription.details.appBindings
+                                .map((binding) => binding.appName)
+                                .toSet()
+                                .join(' · '),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),

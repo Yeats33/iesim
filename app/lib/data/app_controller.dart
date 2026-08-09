@@ -1225,7 +1225,7 @@ SimHubImportReport _developerSampleReport(DateTime now, String timeZoneId) {
       ),
       tags: const ['测试数据', '英国', '主套餐'],
       appearance: const Appearance(flag: '🇬🇧', cardColorHex: '#2374AB'),
-      details: const SubscriptionDetails(
+      details: SubscriptionDetails(
         profileName: '英国主号（测试）',
         countryCode: 'GB',
         countryName: 'United Kingdom',
@@ -1243,6 +1243,35 @@ SimHubImportReport _developerSampleReport(DateTime now, String timeZoneId) {
             promoCode: 'RNAFZW',
             note: '英国实体 SIM / 手机号码推荐。',
             isBuiltIn: true,
+          ),
+        ],
+        appBindings: [
+          PhoneAppBinding(
+            id: 'developer-sample-whatsapp-binding',
+            phoneNumber: '+447700900001',
+            appName: 'WhatsApp Messenger',
+            presetId: 'whatsapp',
+            developerName: 'WhatsApp LLC',
+            accountLabel: '主账号（测试）',
+            purposes: const [
+              PhoneAppBindingPurpose.messaging,
+              PhoneAppBindingPurpose.verification,
+            ],
+            verificationChannels: const [
+              PhoneVerificationChannel.sms,
+              PhoneVerificationChannel.voiceCall,
+            ],
+            verifiedAt: createdAt,
+            appStoreId: '310633997',
+            appStoreBundleId: 'net.whatsapp.WhatsApp',
+            appStoreUrl:
+                'https://apps.apple.com/app/whatsapp-messenger/id310633997',
+            googlePlayPackage: 'com.whatsapp',
+            googlePlayUrl:
+                'https://play.google.com/store/apps/details?id=com.whatsapp',
+            websiteUrl: 'https://www.whatsapp.com/',
+            createdAt: createdAt,
+            updatedAt: now,
           ),
         ],
         orderIndex: 0,

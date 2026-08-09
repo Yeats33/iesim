@@ -534,6 +534,9 @@ class ImportMergePlanner {
       affiliateOffers: local.details.affiliateOffers.isEmpty
           ? incoming.details.affiliateOffers
           : local.details.affiliateOffers,
+      appBindings: local.details.appBindings.isEmpty
+          ? incoming.details.appBindings
+          : local.details.appBindings,
       topUpCycleUnit:
           local.details.topUpCycleUnit ?? incoming.details.topUpCycleUnit,
       renewalIntervalValue:

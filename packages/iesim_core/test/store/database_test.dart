@@ -54,6 +54,7 @@ void main() {
           'profile_name',
           'profile_class_code',
           'installed_profile_size_bytes',
+          'app_bindings_json',
         ]),
       );
       expect(

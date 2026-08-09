@@ -212,7 +212,7 @@ Subscription _subscription(String id, DateTime updatedAt) => Subscription(
   ),
   tags: const ['主卡'],
   appearance: const Appearance(flag: '🇨🇳', cardColorHex: '#123456'),
-  details: const SubscriptionDetails(
+  details: SubscriptionDetails(
     profileName: '同步 Profile',
     profileClassCode: 2,
     declaredProfileSizeBytes: 48000,
@@ -220,8 +220,8 @@ Subscription _subscription(String id, DateTime updatedAt) => Subscription(
     gid1: '01',
     gid2: '02',
     countryCode: 'CN',
-    currentBalance: Money(minorUnits: 100, currencyCode: 'CNY'),
-    affiliateOffers: [
+    currentBalance: const Money(minorUnits: 100, currencyCode: 'CNY'),
+    affiliateOffers: const [
       AffiliateOffer(
         id: 'aff-1',
         brand: 'eSIM.gg',
@@ -229,6 +229,18 @@ Subscription _subscription(String id, DateTime updatedAt) => Subscription(
         url: 'https://esim.gg/',
         promoCode: '1esim',
         isBuiltIn: true,
+      ),
+    ],
+    appBindings: [
+      PhoneAppBinding(
+        id: 'binding-1',
+        phoneNumber: '10086',
+        appName: 'WhatsApp Messenger',
+        presetId: 'whatsapp',
+        purposes: const [PhoneAppBindingPurpose.messaging],
+        verificationChannels: const [PhoneVerificationChannel.sms],
+        createdAt: DateTime.utc(2026, 8, 1),
+        updatedAt: updatedAt,
       ),
     ],
     isDormant: true,

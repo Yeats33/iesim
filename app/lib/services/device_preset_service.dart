@@ -49,7 +49,7 @@ class HttpDevicePresetTransport implements DevicePresetTransport {
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       request.headers.set(
         HttpHeaders.userAgentHeader,
-        'iesim/0.0.1-alpha device-presets',
+        'iesim/0.0.1-bate device-presets',
       );
       if (etag != null && etag.isNotEmpty) {
         request.headers.set(HttpHeaders.ifNoneMatchHeader, etag);

@@ -1,5 +1,6 @@
 import '../value/money.dart';
 import 'affiliate_offer.dart';
+import 'phone_app_binding.dart';
 
 const _unsetSubscriptionDetail = Object();
 
@@ -26,6 +27,7 @@ class SubscriptionDetails {
     this.activationDate,
     this.currentBalance,
     this.affiliateOffers = const [],
+    this.appBindings = const [],
     this.autoTopUpEnabled = false,
     this.topUpCycleUnit,
     this.renewalIntervalValue,
@@ -66,6 +68,7 @@ class SubscriptionDetails {
   final DateTime? activationDate;
   final Money? currentBalance;
   final List<AffiliateOffer> affiliateOffers;
+  final List<PhoneAppBinding> appBindings;
   final bool autoTopUpEnabled;
   final String? topUpCycleUnit;
   final int? renewalIntervalValue;
@@ -96,6 +99,7 @@ class SubscriptionDetails {
     DateTime? activationDate,
     Money? currentBalance,
     List<AffiliateOffer>? affiliateOffers,
+    List<PhoneAppBinding>? appBindings,
     bool? autoTopUpEnabled,
     String? topUpCycleUnit,
     int? renewalIntervalValue,
@@ -130,6 +134,7 @@ class SubscriptionDetails {
     activationDate: activationDate ?? this.activationDate,
     currentBalance: currentBalance ?? this.currentBalance,
     affiliateOffers: affiliateOffers ?? this.affiliateOffers,
+    appBindings: appBindings ?? this.appBindings,
     autoTopUpEnabled: autoTopUpEnabled ?? this.autoTopUpEnabled,
     topUpCycleUnit: topUpCycleUnit ?? this.topUpCycleUnit,
     renewalIntervalValue: renewalIntervalValue ?? this.renewalIntervalValue,
@@ -163,6 +168,7 @@ class SubscriptionDetails {
       other.activationDate == activationDate &&
       other.currentBalance == currentBalance &&
       _listEquals(other.affiliateOffers, affiliateOffers) &&
+      _listEquals(other.appBindings, appBindings) &&
       other.autoTopUpEnabled == autoTopUpEnabled &&
       other.topUpCycleUnit == topUpCycleUnit &&
       other.renewalIntervalValue == renewalIntervalValue &&
@@ -194,6 +200,7 @@ class SubscriptionDetails {
     activationDate,
     currentBalance,
     Object.hashAll(affiliateOffers),
+    Object.hashAll(appBindings),
     autoTopUpEnabled,
     topUpCycleUnit,
     renewalIntervalValue,
@@ -208,7 +215,7 @@ class SubscriptionDetails {
     isPinned,
   ]);
 
-  static bool _listEquals(List<AffiliateOffer> a, List<AffiliateOffer> b) {
+  static bool _listEquals<T>(List<T> a, List<T> b) {
     if (a.length != b.length) return false;
     for (var i = 0; i < a.length; i++) {
       if (a[i] != b[i]) return false;

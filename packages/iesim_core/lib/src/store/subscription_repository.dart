@@ -6,6 +6,7 @@ import '../model/appearance.dart';
 import '../model/affiliate_offer.dart';
 import '../model/keep_alive.dart';
 import '../model/plan.dart';
+import '../model/phone_app_binding.dart';
 import '../model/profile_lifecycle.dart';
 import '../model/subscription.dart';
 import '../model/subscription_details.dart';
@@ -37,6 +38,7 @@ class SubscriptionRepository {
   secondary_phone_number, secondary_phone_enabled,
   activation_date, current_balance_minor, current_balance_currency,
   affiliate_offers_json,
+  app_bindings_json,
   auto_top_up_enabled, top_up_cycle_unit, renewal_interval_value, renewal_unit,
   transaction_notes, carrier_app_name, carrier_app_store_url,
   carrier_app_icon_url, keep_alive_mode_raw, order_index, is_dormant, is_pinned,
@@ -58,6 +60,7 @@ class SubscriptionRepository {
   ?, ?, ?, ?, ?,
   ?, ?,
   ?, ?, ?,
+  ?,
   ?,
   ?, ?, ?, ?,
   ?, ?, ?,
@@ -100,6 +103,7 @@ ON CONFLICT(id) DO UPDATE SET
   current_balance_minor = excluded.current_balance_minor,
   current_balance_currency = excluded.current_balance_currency,
   affiliate_offers_json = excluded.affiliate_offers_json,
+  app_bindings_json = excluded.app_bindings_json,
   auto_top_up_enabled = excluded.auto_top_up_enabled,
   top_up_cycle_unit = excluded.top_up_cycle_unit,
   renewal_interval_value = excluded.renewal_interval_value,
@@ -164,6 +168,9 @@ ON CONFLICT(id) DO UPDATE SET
           s.details.currentBalance?.currencyCode,
           jsonEncode(
             s.details.affiliateOffers.map((offer) => offer.toJson()).toList(),
+          ),
+          jsonEncode(
+            s.details.appBindings.map((binding) => binding.toJson()).toList(),
           ),
           s.details.autoTopUpEnabled ? 1 : 0,
           s.details.topUpCycleUnit,
@@ -326,6 +333,7 @@ ON CONFLICT(id) DO UPDATE SET
         affiliateOffers: _decodeAffiliateOffers(
           row['affiliate_offers_json'] as String,
         ),
+        appBindings: _decodeAppBindings(row['app_bindings_json'] as String),
         autoTopUpEnabled: row['auto_top_up_enabled'] == 1,
         topUpCycleUnit: row['top_up_cycle_unit'] as String?,
         renewalIntervalValue: row['renewal_interval_value'] as int?,
@@ -367,6 +375,19 @@ ON CONFLICT(id) DO UPDATE SET
         .map(
           (value) =>
               AffiliateOffer.fromJson(Map<String, dynamic>.from(value as Map)),
+        )
+        .toList(growable: false);
+  }
+
+  static List<PhoneAppBinding> _decodeAppBindings(String source) {
+    final decoded = jsonDecode(source);
+    if (decoded is! List) {
+      throw const FormatException('号码绑定存储格式无效');
+    }
+    return decoded
+        .map(
+          (value) =>
+              PhoneAppBinding.fromJson(Map<String, dynamic>.from(value as Map)),
         )
         .toList(growable: false);
   }

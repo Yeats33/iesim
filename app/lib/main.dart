@@ -13,6 +13,7 @@ import 'data/app_preferences.dart';
 import 'pages/home_shell.dart';
 import 'pages/subscription_detail_page.dart';
 import 'platform/device_timezone.dart';
+import 'services/euicc_card_preset_service.dart';
 import 'services/reminder_notifications.dart';
 import 'widgets/app_logo.dart';
 
@@ -28,6 +29,9 @@ Future<void> main() async {
       persistRemindersEnabled: preferences.setRemindersEnabled,
       museumAutoArchiveDays: preferences.museumAutoArchiveDays,
       persistMuseumAutoArchiveDays: preferences.setMuseumAutoArchiveDays,
+      showNekokoTags: preferences.showNekokoTags,
+      persistShowNekokoTags: preferences.setShowNekokoTags,
+      euiccCardPresetService: EuiccCardPresetService(),
       enableWebDav: true,
     );
     await controller.initialize(

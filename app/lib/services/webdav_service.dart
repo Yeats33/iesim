@@ -7,16 +7,21 @@ import 'package:iesim_core/iesim_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xml/xml.dart';
 
+import 'credential_vault.dart';
+import 'encrypted_sync_transport.dart';
+
 class WebDavConfiguration {
   const WebDavConfiguration({
     required this.directoryUrl,
     required this.username,
     required this.password,
+    required this.encryptionPassword,
   });
 
   final String directoryUrl;
   final String username;
   final String password;
+  final String encryptionPassword;
 
   Uri get directoryUri {
     final uri = Uri.parse(directoryUrl.trim());
@@ -31,7 +36,12 @@ class WebDavConfiguration {
     return uri.replace(path: path);
   }
 
-  Uri get snapshotUri => directoryUri.resolve('iesim-v1.json');
+  Uri get snapshotUri {
+    if (encryptionPassword.length < 12) {
+      throw const FormatException('同步加密口令至少需要 12 个字符');
+    }
+    return directoryUri.resolve('iesim-v1.encrypted.json');
+  }
 }
 
 abstract interface class WebDavGateway {
@@ -51,14 +61,16 @@ abstract interface class WebDavGateway {
 }
 
 class AppWebDavService implements WebDavGateway {
-  AppWebDavService(this._store);
+  AppWebDavService(this._store, this._credentialVault);
 
   static const _urlKey = 'webdav.directory_url';
   static const _usernameKey = 'webdav.username';
   static const _passwordKey = 'webdav.password';
+  static const _encryptionPasswordKey = 'webdav.encryption_password';
   static const _secureStorage = FlutterSecureStorage();
 
   final SyncStore _store;
+  final ActivationCredentialVault _credentialVault;
 
   @override
   Future<WebDavConfiguration?> loadConfiguration() async {
@@ -66,11 +78,20 @@ class AppWebDavService implements WebDavGateway {
     final url = preferences.getString(_urlKey);
     final username = preferences.getString(_usernameKey);
     final password = await _secureStorage.read(key: _passwordKey);
-    if (url == null || username == null || password == null) return null;
+    final encryptionPassword = await _secureStorage.read(
+      key: _encryptionPasswordKey,
+    );
+    if (url == null ||
+        username == null ||
+        password == null ||
+        encryptionPassword == null) {
+      return null;
+    }
     return WebDavConfiguration(
       directoryUrl: url,
       username: username,
       password: password,
+      encryptionPassword: encryptionPassword,
     );
   }
 
@@ -79,9 +100,14 @@ class AppWebDavService implements WebDavGateway {
     final preferences = await SharedPreferences.getInstance();
     final oldUrl = preferences.getString(_urlKey);
     final oldUsername = preferences.getString(_usernameKey);
+    final oldEncryptionPassword = await _secureStorage.read(
+      key: _encryptionPasswordKey,
+    );
+    configuration.snapshotUri;
     final normalizedUrl = configuration.directoryUri.toString();
     if (oldUrl != normalizedUrl ||
-        oldUsername != configuration.username.trim()) {
+        oldUsername != configuration.username.trim() ||
+        oldEncryptionPassword != configuration.encryptionPassword) {
       final reset = _store.resetState();
       if (reset case Err(failure: final failure)) {
         throw StateError('$failure');
@@ -93,6 +119,10 @@ class AppWebDavService implements WebDavGateway {
       key: _passwordKey,
       value: configuration.password,
     );
+    await _secureStorage.write(
+      key: _encryptionPasswordKey,
+      value: configuration.encryptionPassword,
+    );
   }
 
   @override
@@ -101,29 +131,44 @@ class AppWebDavService implements WebDavGateway {
     await preferences.remove(_urlKey);
     await preferences.remove(_usernameKey);
     await _secureStorage.delete(key: _passwordKey);
+    await _secureStorage.delete(key: _encryptionPasswordKey);
   }
 
   @override
   Future<Result<void>> testConnection(WebDavConfiguration configuration) async {
-    final transport = HttpWebDavTransport(configuration);
+    final baseTransport = HttpWebDavTransport(configuration);
+    final transport = EncryptedWebDavTransport(
+      baseTransport,
+      password: configuration.encryptionPassword,
+      vault: _credentialVault,
+    );
     try {
       final collection = await transport.ensureCollection();
       if (collection case Err(failure: final failure)) return Err(failure);
       final stat = await transport.stat();
       if (stat case Err(failure: final failure)) return Err(failure);
+      if ((stat as Ok<RemoteFileMetadata?>).value != null) {
+        final download = await transport.download();
+        if (download case Err(failure: final failure)) return Err(failure);
+      }
       return const Ok(null);
     } finally {
-      transport.close();
+      baseTransport.close();
     }
   }
 
   @override
   Future<Result<SyncRunReport>> sync(WebDavConfiguration configuration) async {
-    final transport = HttpWebDavTransport(configuration);
+    final baseTransport = HttpWebDavTransport(configuration);
+    final transport = EncryptedWebDavTransport(
+      baseTransport,
+      password: configuration.encryptionPassword,
+      vault: _credentialVault,
+    );
     try {
       return await WebDavSyncEngine(store: _store, transport: transport).sync();
     } finally {
-      transport.close();
+      baseTransport.close();
     }
   }
 

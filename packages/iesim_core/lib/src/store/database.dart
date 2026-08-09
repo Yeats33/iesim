@@ -70,10 +70,6 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   order_index INTEGER NOT NULL DEFAULT 0,
   is_dormant INTEGER NOT NULL DEFAULT 0,
   is_pinned INTEGER NOT NULL DEFAULT 0,
-  smdp_address TEXT,
-  activation_code TEXT,
-  activation_extra TEXT,
-  confirmation_code TEXT,
   plan_name TEXT,
   plan_cycle_minor INTEGER,
   plan_cycle_currency TEXT,
@@ -96,6 +92,8 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_subscriptions_order
+  ON subscriptions(order_index, created_at);
 
 CREATE TABLE IF NOT EXISTS activity_records (
   id TEXT PRIMARY KEY,
@@ -111,6 +109,8 @@ CREATE TABLE IF NOT EXISTS activity_records (
 );
 CREATE INDEX IF NOT EXISTS idx_activity_sub_occ
   ON activity_records(subscription_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_activity_occurred
+  ON activity_records(occurred_at, id);
 
 CREATE TABLE IF NOT EXISTS devices (
   id TEXT PRIMARY KEY,
@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   iccid TEXT UNIQUE,
   operator_name TEXT,
   nickname TEXT,
+  nekoko_tags_raw TEXT,
   subscription_id TEXT UNIQUE REFERENCES subscriptions(id) ON DELETE SET NULL,
   is_pinned INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
@@ -270,10 +271,6 @@ bool _matchesCurrentSchema(Database db) {
       'order_index',
       'is_dormant',
       'is_pinned',
-      'smdp_address',
-      'activation_code',
-      'activation_extra',
-      'confirmation_code',
       'plan_name',
       'plan_cycle_minor',
       'plan_cycle_currency',
@@ -350,6 +347,7 @@ bool _matchesCurrentSchema(Database db) {
       'iccid',
       'operator_name',
       'nickname',
+      'nekoko_tags_raw',
       'subscription_id',
       'is_pinned',
       'created_at',

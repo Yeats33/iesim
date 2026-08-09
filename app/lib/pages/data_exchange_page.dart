@@ -9,8 +9,10 @@ import 'package:uuid/uuid.dart';
 import '../app/app_scope.dart';
 import '../app/brand.dart';
 import '../platform/document_saver.dart';
+import '../services/import_merge_service.dart';
 import '../services/profile_catalog_service.dart';
 import '../widgets/section_card.dart';
+import '../widgets/import_merge_center.dart';
 import 'lpa_scanner_page.dart';
 import 'subscription_detail_page.dart';
 
@@ -352,6 +354,9 @@ class _DataExchangePageState extends State<DataExchangePage> {
     final controller = AppScope.of(context);
     final now = DateTime.now().toUtc();
     final candidate = choice.candidate;
+    final matchedProfileName = candidate?.profileNames.length == 1
+        ? candidate!.profileNames.single
+        : null;
     final importedActivation = LpaActivation(
       smdpAddress: activation.smdpAddress,
       matchingId: activation.matchingId,
@@ -364,11 +369,7 @@ class _DataExchangePageState extends State<DataExchangePage> {
       operator: candidate?.serviceProviderName,
       lifecycle: const ProfileLifecycle(stage: ProfileStage.pendingActivation),
       activation: importedActivation,
-      plan: Plan(
-        name: candidate?.profileNames.length == 1
-            ? candidate!.profileNames.single
-            : null,
-      ),
+      plan: Plan(),
       keepAlive: KeepAlive(
         required: true,
         confidence: DataConfidence.confirmed,
@@ -380,6 +381,12 @@ class _DataExchangePageState extends State<DataExchangePage> {
           'PLMN:${candidate.plmn}',
       ],
       appearance: const Appearance(cardColorHex: '#2374AB'),
+      details: SubscriptionDetails(
+        profileName: matchedProfileName,
+        declaredProfileSizeBytes: candidate?.sizeForEum(match?.referenceEum),
+        mcc: candidate?.mcc,
+        mnc: candidate?.mnc,
+      ),
       timeZoneId: controller.defaultTimeZoneId,
       createdAt: now,
       updatedAt: now,
@@ -421,24 +428,45 @@ class _DataExchangePageState extends State<DataExchangePage> {
       final bytes = await file.readAsBytes();
       if (!mounted) return;
       final source = utf8.decode(bytes);
-      final report = AppScope.of(context).inspectSimHub(source);
-      final destination = await showModalBottomSheet<_ImportDestination>(
+      final controller = AppScope.of(context);
+      final report = controller.inspectSimHub(source);
+      final planner = ImportMergePlanner(
+        existingSubscriptions: controller.subscriptions,
+        existingAssets: controller.assets,
+      );
+      final plan = planner.inspect(report.subscriptions);
+      final selection = await showModalBottomSheet<ImportMergeSelection>(
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
         showDragHandle: true,
-        builder: (_) => _ImportPreview(report: report, fileName: file.name),
+        builder: (_) => ImportMergeCenter(
+          plan: plan,
+          fileName: file.name,
+          sourceLabel: 'ieSIM / SimHub / SimJ JSON',
+          inventory: controller.assets,
+          issueCount: report.issues.length,
+        ),
       );
-      if (destination == null || !mounted) return;
-      final importReport = destination == _ImportDestination.museum
-          ? _simHubReportForMuseum(report)
-          : report;
-      final error = await AppScope.of(context).applySimHubImport(importReport);
+      if (selection == null || !mounted) return;
+      var importReport = planner.resolveSimHub(
+        report: report,
+        plan: plan,
+        actions: selection.actions,
+        targetEidId: selection.targetEidId,
+        nowUtc: DateTime.now().toUtc(),
+      );
+      if (selection.importToMuseum) {
+        importReport = _simHubReportForMuseum(importReport);
+      }
+      final error = await controller.applySimHubImport(importReport);
       if (!mounted) return;
       _showMessage(
         error ??
-            '已导入 ${report.importedCount} 个 Profile、${report.assets.devices.length} 台设备、'
-                '${report.assets.cards.length} 张卡片和 ${report.activityRecords.length} 条动作记录。',
+            '已写入 ${importReport.importedCount} 个 Profile、'
+                '${importReport.assets.devices.length} 台设备、'
+                '${importReport.assets.cards.length} 张卡片和 '
+                '${importReport.activityRecords.length} 条动作记录。',
       );
     } on FormatException {
       _showMessage('文件不是有效的 UTF-8 文本。');
@@ -469,33 +497,51 @@ class _DataExchangePageState extends State<DataExchangePage> {
         return;
       }
       if (!mounted) return;
-      final result = AppScope.of(context).inspectNekokoDatabase(file.path);
+      final controller = AppScope.of(context);
+      final result = controller.inspectNekokoDatabase(file.path);
       if (result case Err(failure: final failure)) {
         _showMessage(_failureText(failure));
         return;
       }
       final report = (result as Ok<NekokoImportReport>).value;
-      final destination = await showModalBottomSheet<_ImportDestination>(
+      final planner = ImportMergePlanner(
+        existingSubscriptions: controller.subscriptions,
+        existingAssets: controller.assets,
+      );
+      final plan = planner.inspect(report.subscriptions);
+      final selection = await showModalBottomSheet<ImportMergeSelection>(
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
         showDragHandle: true,
-        builder: (_) =>
-            _NekokoImportPreview(report: report, fileName: file.name),
+        builder: (_) => ImportMergeCenter(
+          plan: plan,
+          fileName: file.name,
+          sourceLabel: 'Nekoko 数据库',
+          inventory: controller.assets,
+          issueCount: report.issues.length,
+        ),
       );
-      if (destination == null || !mounted) return;
-      final importReport = destination == _ImportDestination.museum
-          ? _nekokoReportForMuseum(report)
-          : report;
-      final error = await AppScope.of(context).applyNekokoImport(importReport);
+      if (selection == null || !mounted) return;
+      var importReport = planner.resolveNekoko(
+        report: report,
+        plan: plan,
+        actions: selection.actions,
+        targetEidId: selection.targetEidId,
+        nowUtc: DateTime.now().toUtc(),
+      );
+      if (selection.importToMuseum) {
+        importReport = _nekokoReportForMuseum(importReport);
+      }
+      final error = await controller.applyNekokoImport(importReport);
       if (!mounted) return;
       if (error != null) {
         _showMessage(error);
         return;
       }
       _showMessage(
-        '已转换为 ${report.subscriptions.length} 个 ieSIM Profile，'
-        '并建立 ${report.assets.eids.length} 个新 EID；已返回首页，可直接编辑。',
+        '已写入 ${importReport.subscriptions.length} 个 ieSIM Profile，'
+        '并处理 ${importReport.assets.eids.length} 个 EID；已返回首页，可直接编辑。',
       );
       Navigator.pop(context);
     } catch (error) {
@@ -1208,382 +1254,6 @@ class _LookupNotice extends StatelessWidget {
               ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-enum _ImportDestination { source, museum }
-
-class _ImportPreview extends StatelessWidget {
-  const _ImportPreview({required this.report, required this.fileName});
-
-  final SimHubImportReport report;
-  final String fileName;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: .68,
-      minChildSize: .42,
-      maxChildSize: .92,
-      builder: (context, scrollController) => Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('导入预览', style: Theme.of(context).textTheme.headlineSmall),
-                const SizedBox(height: 4),
-                Text(
-                  fileName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _PreviewStat(
-                        value: report.importedCount,
-                        label: '可导入',
-                        color: scheme.primary,
-                      ),
-                    ),
-                    const SizedBox(width: 9),
-                    Expanded(
-                      child: _PreviewStat(
-                        value: report.skippedCount,
-                        label: '已跳过',
-                        color: scheme.error,
-                      ),
-                    ),
-                    const SizedBox(width: 9),
-                    Expanded(
-                      child: _PreviewStat(
-                        value: report.issues.length,
-                        label: '提示',
-                        color: const Color(0xFFC27A12),
-                      ),
-                    ),
-                  ],
-                ),
-                if (report.assets.devices.isNotEmpty ||
-                    report.assets.cards.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    '同时识别 ${report.assets.devices.length} 台设备、'
-                    '${report.assets.slots.length} 个卡槽、${report.assets.cards.length} 张卡片、'
-                    '${report.assets.eids.length} 个 EID 和 ${report.assets.profiles.length} 个 Profile。',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-                if (report.ignoredServiceCount > 0 ||
-                    report.ignoredBindingCount > 0) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    '备份还包含 ${report.ignoredServiceCount} 条外部服务器配置和 '
-                    '${report.ignoredBindingCount} 条服务绑定；它们不属于 SIM/eSIM 资产，'
-                    '可能包含账户与服务器信息，本次不导入。',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const Divider(),
-          Expanded(
-            child: report.issues.isEmpty
-                ? ListView(
-                    controller: scrollController,
-                    padding: const EdgeInsets.all(24),
-                    children: const [
-                      Icon(
-                        Icons.verified_rounded,
-                        size: 48,
-                        color: Color(0xFF21805D),
-                      ),
-                      SizedBox(height: 12),
-                      Text('全部记录已通过格式检查', textAlign: TextAlign.center),
-                    ],
-                  )
-                : ListView.separated(
-                    controller: scrollController,
-                    padding: const EdgeInsets.all(16),
-                    itemCount: report.issues.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final issue = report.issues[index];
-                      return Container(
-                        padding: const EdgeInsets.all(13),
-                        decoration: BoxDecoration(
-                          color: scheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(
-                              Icons.info_outline_rounded,
-                              size: 18,
-                              color: scheme.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                '${issue.recordIndex == null ? '文件' : '第 ${issue.recordIndex} 条'}'
-                                ' · ${issue.field}\n${issue.message}',
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              12,
-              16,
-              MediaQuery.paddingOf(context).bottom + 14,
-            ),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: report.importedCount == 0
-                            ? null
-                            : () => Navigator.pop(
-                                context,
-                                _ImportDestination.museum,
-                              ),
-                        icon: const Icon(Icons.museum_outlined),
-                        label: const Text('导入博物馆'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: report.importedCount == 0
-                            ? null
-                            : () => Navigator.pop(
-                                context,
-                                _ImportDestination.source,
-                              ),
-                        child: const Text('正常导入'),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('取消'),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _NekokoImportPreview extends StatelessWidget {
-  const _NekokoImportPreview({required this.report, required this.fileName});
-
-  final NekokoImportReport report;
-  final String fileName;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: .68,
-      minChildSize: .42,
-      maxChildSize: .9,
-      builder: (context, scrollController) => Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Nekoko 导入预览',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  fileName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  '识别 ${report.sourceProfileCount} 条源记录；可写入 '
-                  '${report.assets.profiles.length} 个 Profile、'
-                  '${report.assets.cards.length} 张新 eUICC 卡、'
-                  '${report.assets.eids.length} 个新 EID，'
-                  '并新增或补全 ${report.subscriptions.length} 条订阅。',
-                ),
-                const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: scheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Text(
-                    '导入时会转换为 ieSIM 原生 Profile：名称、运营商、标签、设备状态、'
-                    'EID/ICCID、类别、GID 与容量资料会按本地模型保存。完成后返回首页，'
-                    '可使用标准编辑器继续修改。',
-                    style: TextStyle(color: scheme.onPrimaryContainer),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Divider(),
-          Expanded(
-            child: report.issues.isEmpty
-                ? ListView(
-                    controller: scrollController,
-                    padding: const EdgeInsets.all(24),
-                    children: const [
-                      Icon(
-                        Icons.verified_rounded,
-                        size: 48,
-                        color: Color(0xFF21805D),
-                      ),
-                      SizedBox(height: 12),
-                      Text('全部可互操作资料已通过检查', textAlign: TextAlign.center),
-                    ],
-                  )
-                : ListView.separated(
-                    controller: scrollController,
-                    padding: const EdgeInsets.all(16),
-                    itemCount: report.issues.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final issue = report.issues[index];
-                      return ListTile(
-                        tileColor: scheme.surfaceContainerHighest,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        leading: const Icon(Icons.info_outline_rounded),
-                        title: Text(
-                          issue.record == null ? '文件提示' : '第 ${issue.record} 条',
-                        ),
-                        subtitle: Text(issue.message),
-                      );
-                    },
-                  ),
-          ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              12,
-              16,
-              MediaQuery.paddingOf(context).bottom + 14,
-            ),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed:
-                            report.assets.profiles.isEmpty &&
-                                report.subscriptions.isEmpty
-                            ? null
-                            : () => Navigator.pop(
-                                context,
-                                _ImportDestination.museum,
-                              ),
-                        icon: const Icon(Icons.museum_outlined),
-                        label: const Text('导入博物馆'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed:
-                            report.assets.profiles.isEmpty &&
-                                report.subscriptions.isEmpty
-                            ? null
-                            : () => Navigator.pop(
-                                context,
-                                _ImportDestination.source,
-                              ),
-                        child: const Text('导入到首页'),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('取消'),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PreviewStat extends StatelessWidget {
-  const _PreviewStat({
-    required this.value,
-    required this.label,
-    required this.color,
-  });
-
-  final int value;
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: .1),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '$value',
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(color: color),
-          ),
-          Text(label, style: Theme.of(context).textTheme.labelSmall),
         ],
       ),
     );

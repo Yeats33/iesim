@@ -18,11 +18,16 @@ class _NekokoTagsPageState extends State<NekokoTagsPage> {
   final _nickname = TextEditingController();
   String? _subscriptionId;
   bool _saving = false;
+  bool _loadedInitialSource = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _subscriptionId ??= _preferredSubscription()?.id;
+    if (!_loadedInitialSource) {
+      _loadedInitialSource = true;
+      _loadProfileSource(_subscriptionId);
+    }
   }
 
   @override
@@ -47,6 +52,13 @@ class _NekokoTagsPageState extends State<NekokoTagsPage> {
     }
     final decoded = NekokoTagCodec.decode(_nickname.text);
     final selected = _selectedSubscription();
+    final preview = selected == null || decoded.tags.isEmpty
+        ? null
+        : NekokoTagExtractor.apply(
+            selected,
+            decoded.tags,
+            updatedAtUtc: selected.updatedAt,
+          );
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
@@ -71,7 +83,7 @@ class _NekokoTagsPageState extends State<NekokoTagsPage> {
                 const SizedBox(width: 14),
                 Expanded(
                   child: Text(
-                    '粘贴 Nekoko Profile nickname，可读取标签；也可把 ieSIM 标签生成回 nickname。',
+                    'Nekoko Tag 会作为隐藏的外部元数据保存。只有点击提取后，识别出的内容才会写入 ieSIM 原生字段。',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                 ),
@@ -102,13 +114,14 @@ class _NekokoTagsPageState extends State<NekokoTagsPage> {
                     ),
                   ),
               ],
-              onChanged: (value) => setState(() => _subscriptionId = value),
+              onChanged: _selectSubscription,
             ),
           ),
           const SizedBox(height: 16),
           SectionCard(
-            title: 'Profile nickname',
-            subtitle: '支持 t:文本 与 d:YYMMDD:备注',
+            title: 'Nekoko Tag 原始值',
+            subtitle:
+                '支持 t:文本 与 d:YYMMDD:备注；无备注日期按套餐到期日解析',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -118,7 +131,7 @@ class _NekokoTagsPageState extends State<NekokoTagsPage> {
                   maxLines: 7,
                   onChanged: (_) => setState(() {}),
                   decoration: const InputDecoration(
-                    hintText: 'Main Profile t:旅行卡 d:260808:续费',
+                    hintText: 't:旅行卡 d:260808:续费',
                     alignLabelWithHint: true,
                   ),
                 ),
@@ -162,7 +175,7 @@ class _NekokoTagsPageState extends State<NekokoTagsPage> {
                   ),
             child: decoded.tags.isEmpty
                 ? Text(
-                    '普通昵称文字会原样保留。',
+                    '没有可提取的结构化 Tag。',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),
@@ -186,6 +199,23 @@ class _NekokoTagsPageState extends State<NekokoTagsPage> {
                                 ?.copyWith(color: scheme.error),
                           ),
                       ],
+                      if (preview != null &&
+                          preview.appliedFields.isNotEmpty) ...[
+                        const SizedBox(height: 14),
+                        Text(
+                          '将写入：${preview.appliedFields.join('、')}',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      ],
+                      if (preview != null &&
+                          preview.ignoredDateNotes.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          '仅保留、不自动映射：${preview.ignoredDateNotes.join('、')}',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: scheme.onSurfaceVariant),
+                        ),
+                      ],
                       const SizedBox(height: 18),
                       FilledButton.icon(
                         onPressed: _saving || selected == null
@@ -200,7 +230,7 @@ class _NekokoTagsPageState extends State<NekokoTagsPage> {
                                 ),
                               )
                             : const Icon(Icons.download_done_rounded),
-                        label: const Text('应用文本标签到订阅'),
+                        label: const Text('保存原始值并提取到 ieSIM'),
                       ),
                     ],
                   ),
@@ -221,6 +251,24 @@ class _NekokoTagsPageState extends State<NekokoTagsPage> {
   Subscription? _selectedSubscription() {
     final id = _subscriptionId;
     return id == null ? null : AppScope.of(context).subscriptionById(id);
+  }
+
+  void _selectSubscription(String? value) {
+    setState(() {
+      _subscriptionId = value;
+      _loadProfileSource(value);
+    });
+  }
+
+  void _loadProfileSource(String? subscriptionId) {
+    final controller = AppScope.of(context);
+    final subscription = subscriptionId == null
+        ? null
+        : controller.subscriptionById(subscriptionId);
+    final profile = subscription == null
+        ? null
+        : controller.assetProfileForSubscription(subscription);
+    _nickname.text = profile?.nekokoTagsRaw ?? '';
   }
 
   Future<void> _paste() async {
@@ -261,9 +309,9 @@ class _NekokoTagsPageState extends State<NekokoTagsPage> {
         ),
       );
     }
-    final nickname = NekokoTagCodec.replaceTags(_nickname.text, tags);
-    _nickname.text = nickname;
-    await Clipboard.setData(ClipboardData(text: nickname));
+    final source = NekokoTagCodec.encode(tags);
+    _nickname.text = source;
+    await Clipboard.setData(ClipboardData(text: source));
     if (!mounted) return;
     setState(() {});
     ScaffoldMessenger.of(context).showSnackBar(
@@ -279,20 +327,35 @@ class _NekokoTagsPageState extends State<NekokoTagsPage> {
     NekokoDecodeResult decoded,
   ) async {
     setState(() => _saving = true);
-    final tags = [
-      for (final tag in decoded.tags)
-        if (tag case NekokoTextTag(value: final value)) value,
-    ];
-    final error = await AppScope.of(context).saveSubscription(
-      subscription.copyWith(tags: tags, updatedAt: DateTime.now().toUtc()),
+    final controller = AppScope.of(context);
+    final now = DateTime.now().toUtc();
+    final rawTags = NekokoTagCodec.encode(decoded.tags);
+    final profile = controller.assetProfileForSubscription(subscription);
+    var error = profile == null
+        ? null
+        : await controller.saveProfile(
+            profile.copyWith(nekokoTagsRaw: rawTags, updatedAt: now),
+          );
+    final extraction = NekokoTagExtractor.apply(
+      subscription,
+      decoded.tags,
+      updatedAtUtc: now,
     );
+    error ??= await controller.saveSubscription(extraction.subscription);
     if (!mounted) return;
     setState(() => _saving = false);
+    final message = switch (error) {
+      final String value => value,
+      null when extraction.appliedFields.isEmpty =>
+        profile == null
+            ? '没有识别到可写入字段；当前订阅也没有可保存原始值的资产 Profile'
+            : '已保存原始 Tag；没有识别到可写入字段',
+      null =>
+        '已保存并写入 ${extraction.appliedFields.join('、')}'
+            '${extraction.ignoredDateNotes.isEmpty ? '' : '；另有 ${extraction.ignoredDateNotes.length} 个日期仅保留原值'}',
+    };
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(error ?? '已更新 ${tags.length} 个订阅标签'),
-        behavior: SnackBarBehavior.floating,
-      ),
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
   }
 }

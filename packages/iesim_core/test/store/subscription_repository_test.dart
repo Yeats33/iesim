@@ -126,12 +126,19 @@ void main() {
       expect((repo.listAll() as Ok<List<Subscription>>).value, isEmpty);
     });
 
-    test('upsert 后 get 全字段往返一致', () {
+    test('upsert 后业务字段往返一致，LPA 凭据不进入 SQLite', () {
       expect(repo.upsert(full()), isA<Ok<void>>());
       final got = (repo.get('sub-1') as Ok<Subscription?>).value!;
-      expect(got, equals(full()));
+      expect(got, equals(full().copyWith(activation: null)));
       expect(got.iccid, equals('89000000000000000001'));
-      expect(got.activation, equals(full().activation));
+      expect(got.activation, isNull);
+      final columns = db
+          .select('PRAGMA table_info(subscriptions)')
+          .map((row) => row['name'])
+          .toSet();
+      expect(columns, isNot(contains('smdp_address')));
+      expect(columns, isNot(contains('activation_code')));
+      expect(columns, isNot(contains('confirmation_code')));
       expect(
         got.plan.cyclePrice,
         equals(const Money(minorUnits: 2900, currencyCode: 'CNY')),
@@ -149,7 +156,7 @@ void main() {
       expect(repo.upsert(item), isA<Ok<void>>());
       final got = (repo.get(item.id) as Ok<Subscription?>).value!;
       expect(got.number.isUnknown, isTrue);
-      expect(got.activation, item.activation);
+      expect(got.activation, isNull);
     });
 
     test('未存在的 id 返回 null', () {

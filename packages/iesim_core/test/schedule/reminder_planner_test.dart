@@ -131,6 +131,44 @@ void main() {
       isEmpty,
     );
   });
+
+  test('附加保号规则使用独立稳定键安排提醒', () {
+    final subscription = _subscription(
+      lastActivityAt: DateTime.utc(2026, 8, 1),
+      keepAliveDays: 90,
+      lifecycle: ProfileLifecycle(activatedAt: DateTime.utc(2026, 8, 1)),
+      constraints: [
+        KeepAliveConstraint(
+          id: 'first-use-uk',
+          kind: KeepAliveConstraintKind.firstUse,
+          title: '首次使用',
+          details: '十天内在英国使用',
+          withinDays: 10,
+          regions: const ['英国'],
+        ),
+      ],
+    );
+    final reminders = ReminderPlanner(
+      clock: FixedClock(DateTime.utc(2026, 8, 2)),
+    ).planFor(subscription);
+    final constraintReminders = reminders
+        .where((item) => item.kind == ReminderKind.keepAliveConstraint)
+        .toList();
+
+    expect(constraintReminders, hasLength(4));
+    expect(
+      constraintReminders.every((item) => item.ruleId == 'first-use-uk'),
+      isTrue,
+    );
+    expect(
+      constraintReminders.every((item) => item.ruleTitle == '首次使用'),
+      isTrue,
+    );
+    expect(
+      constraintReminders.map((item) => item.stableKey).toSet(),
+      hasLength(4),
+    );
+  });
 }
 
 Subscription _subscription({
@@ -140,6 +178,7 @@ Subscription _subscription({
   DateTime? expiry,
   bool inferred = false,
   ProfileLifecycle lifecycle = const ProfileLifecycle(),
+  List<KeepAliveConstraint> constraints = const [],
 }) => Subscription(
   id: 'sub-a',
   number: PhoneNumber('10086'),
@@ -150,6 +189,7 @@ Subscription _subscription({
     cycleDays: keepAliveDays,
     lastActivityAt: lastActivityAt,
     confidence: inferred ? DataConfidence.inferred : DataConfidence.confirmed,
+    policy: KeepAlivePolicy(constraints: constraints),
   ),
   timeZoneId: timeZoneId,
   createdAt: DateTime.utc(2026, 7, 1),

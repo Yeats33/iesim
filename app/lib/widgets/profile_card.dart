@@ -7,17 +7,21 @@ class ProfileCard extends StatelessWidget {
     required this.profile,
     required this.eid,
     required this.onTap,
+    this.showNekokoTags = false,
   });
 
   final EsimProfile profile;
   final Euicc? eid;
   final VoidCallback onTap;
+  final bool showNekokoTags;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final nickname = _plainNickname(profile.nickname);
-    final tags = _tags(profile.nickname);
+    final nickname = _plainText(profile.nickname);
+    final tags = showNekokoTags
+        ? _tags(profile.nekokoTagsRaw)
+        : const <String>[];
     final provider = _provider(profile);
     return Semantics(
       button: true,
@@ -182,16 +186,20 @@ class ProfileDetailsSheet extends StatelessWidget {
     required this.profile,
     this.eid,
     this.onTogglePin,
+    this.showNekokoTags = false,
   });
 
   final EsimProfile profile;
   final Euicc? eid;
   final Future<void> Function()? onTogglePin;
+  final bool showNekokoTags;
 
   @override
   Widget build(BuildContext context) {
-    final nickname = _plainNickname(profile.nickname);
-    final tags = _tags(profile.nickname);
+    final nickname = _plainText(profile.nickname);
+    final tags = showNekokoTags
+        ? _tags(profile.nekokoTagsRaw)
+        : const <String>[];
     return SafeArea(
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(22, 6, 22, 24),
@@ -241,6 +249,8 @@ class ProfileDetailsSheet extends StatelessWidget {
                 runSpacing: 8,
                 children: [for (final tag in tags) Chip(label: Text(tag))],
               ),
+              const SizedBox(height: 12),
+              _DetailRow(label: '原始值', value: profile.nekokoTagsRaw ?? ''),
             ],
             const SizedBox(height: 20),
             Container(
@@ -335,9 +345,9 @@ String _provider(EsimProfile profile) {
   return value == null || value.isEmpty ? '未识别运营商' : value;
 }
 
-String? _plainNickname(String? nickname) {
-  if (nickname == null) return null;
-  final value = NekokoTagCodec.replaceTags(nickname, const []).trim();
+String? _plainText(String? source) {
+  if (source == null) return null;
+  final value = source.trim();
   return value.isEmpty ? null : value;
 }
 

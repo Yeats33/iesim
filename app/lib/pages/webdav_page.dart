@@ -18,8 +18,10 @@ class _WebDavPageState extends State<WebDavPage> {
   final _urlController = TextEditingController();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _encryptionPasswordController = TextEditingController();
   bool _initialized = false;
   bool _obscurePassword = true;
+  bool _obscureEncryptionPassword = true;
   bool _working = false;
 
   @override
@@ -32,6 +34,7 @@ class _WebDavPageState extends State<WebDavPage> {
       _urlController.text = configuration.directoryUrl;
       _usernameController.text = configuration.username;
       _passwordController.text = configuration.password;
+      _encryptionPasswordController.text = configuration.encryptionPassword;
     }
   }
 
@@ -40,6 +43,7 @@ class _WebDavPageState extends State<WebDavPage> {
     _urlController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
+    _encryptionPasswordController.dispose();
     super.dispose();
   }
 
@@ -73,7 +77,7 @@ class _WebDavPageState extends State<WebDavPage> {
                   const SizedBox(height: 18),
                   SectionCard(
                     title: configured ? '连接配置' : '连接你的 WebDAV',
-                    subtitle: 'ieSIM 只读写该目录中的 iesim-v1.json',
+                    subtitle: 'ieSIM 只读写该目录中的 iesim-v1.encrypted.json',
                     child: Form(
                       key: _formKey,
                       child: Column(
@@ -122,8 +126,45 @@ class _WebDavPageState extends State<WebDavPage> {
                               ),
                             ),
                             validator: _required,
+                          ),
+                          const SizedBox(height: 14),
+                          TextFormField(
+                            controller: _encryptionPasswordController,
+                            obscureText: _obscureEncryptionPassword,
+                            textInputAction: TextInputAction.done,
+                            enableSuggestions: false,
+                            autocorrect: false,
+                            decoration: InputDecoration(
+                              labelText: '同步加密口令',
+                              helperText: '至少 12 个字符；不会发送给 WebDAV 服务商',
+                              prefixIcon: const Icon(
+                                Icons.lock_outline_rounded,
+                              ),
+                              suffixIcon: IconButton(
+                                tooltip: _obscureEncryptionPassword
+                                    ? '显示加密口令'
+                                    : '隐藏加密口令',
+                                onPressed: () => setState(
+                                  () => _obscureEncryptionPassword =
+                                      !_obscureEncryptionPassword,
+                                ),
+                                icon: Icon(
+                                  _obscureEncryptionPassword
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                ),
+                              ),
+                            ),
+                            validator: _validateEncryptionPassword,
                             onFieldSubmitted: (_) =>
                                 _working ? null : _testAndSave(),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '请妥善保存这个口令；丢失后无法解密远端快照。'
+                            '旧的明文 iesim-v1.json 不会被读取或覆盖。',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: scheme.onSurfaceVariant),
                           ),
                           const SizedBox(height: 18),
                           Row(
@@ -175,6 +216,16 @@ class _WebDavPageState extends State<WebDavPage> {
                     child: const Column(
                       children: [
                         InfoRow(
+                          label: '远端快照',
+                          value: 'AES-256-GCM 端到端加密',
+                          icon: Icons.lock_outline_rounded,
+                        ),
+                        InfoRow(
+                          label: '密钥派生',
+                          value: 'PBKDF2-HMAC-SHA256',
+                          icon: Icons.key_outlined,
+                        ),
+                        InfoRow(
                           label: '防覆盖',
                           value: 'ETag 乐观锁，冲突自动重试 3 次',
                           icon: Icons.shield_outlined,
@@ -191,7 +242,7 @@ class _WebDavPageState extends State<WebDavPage> {
                         ),
                         InfoRow(
                           label: '凭据',
-                          value: '密码由 Android 安全存储加密',
+                          value: 'Android 安全存储；不进入 SQLite 明文',
                           icon: Icons.password_rounded,
                         ),
                       ],
@@ -216,6 +267,7 @@ class _WebDavPageState extends State<WebDavPage> {
       directoryUrl: _urlController.text,
       username: _usernameController.text.trim(),
       password: _passwordController.text,
+      encryptionPassword: _encryptionPasswordController.text,
     );
   }
 
@@ -226,7 +278,7 @@ class _WebDavPageState extends State<WebDavPage> {
     final error = await AppScope.of(context).testWebDav(configuration);
     if (!mounted) return;
     setState(() => _working = false);
-    _show(error ?? '连接成功，目录可用', error: error != null);
+    _show(error ?? '连接成功，加密快照可读写', error: error != null);
   }
 
   Future<void> _testAndSave() async {
@@ -239,7 +291,7 @@ class _WebDavPageState extends State<WebDavPage> {
     error ??= await controller.syncWebDav();
     if (!mounted) return;
     setState(() => _working = false);
-    _show(error ?? '连接成功，数据已安全同步', error: error != null);
+    _show(error ?? '连接成功，数据已端到端加密同步', error: error != null);
   }
 
   Future<void> _sync() async {
@@ -275,6 +327,7 @@ class _WebDavPageState extends State<WebDavPage> {
       _urlController.clear();
       _usernameController.clear();
       _passwordController.clear();
+      _encryptionPasswordController.clear();
     }
     _show(error ?? '配置已从本机移除', error: error != null);
   }
@@ -292,6 +345,12 @@ class _WebDavPageState extends State<WebDavPage> {
   static String? _required(String? value) =>
       value == null || value.trim().isEmpty ? '此项不能为空' : null;
 
+  static String? _validateEncryptionPassword(String? value) {
+    if (value == null || value.isEmpty) return '请输入同步加密口令';
+    if (value.length < 12) return '至少需要 12 个字符';
+    return null;
+  }
+
   static String? _validateUrl(String? value) {
     if (value == null || value.trim().isEmpty) return '请输入 WebDAV 目录地址';
     try {
@@ -299,6 +358,7 @@ class _WebDavPageState extends State<WebDavPage> {
         directoryUrl: value,
         username: '',
         password: '',
+        encryptionPassword: 'validation-only',
       );
       configuration.directoryUri;
       return null;

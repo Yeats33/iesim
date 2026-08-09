@@ -15,6 +15,8 @@ import '../interop/lpa_activation.dart';
 /// 时区标识不在构造时校验（校验需时区数据库，构造保持无副作用），
 /// 由 KeepAliveEvaluator / ZonedCalendar 在使用时以 ArgumentError 暴露问题。
 class Subscription {
+  static const _notProvided = Object();
+
   final String id;
 
   /// 与 Nekoko 关联的键（spec §5.2），也作 SimHub JSON 扩展字段。
@@ -86,7 +88,7 @@ class Subscription {
     String? iccid,
     PhoneNumber? number,
     String? operator,
-    LpaActivation? activation,
+    Object? activation = _notProvided,
     Plan? plan,
     KeepAlive? keepAlive,
     List<String>? tags,
@@ -101,7 +103,9 @@ class Subscription {
     iccid: iccid ?? this.iccid,
     number: number ?? this.number,
     operator: operator ?? this.operator,
-    activation: activation ?? this.activation,
+    activation: identical(activation, _notProvided)
+        ? this.activation
+        : activation as LpaActivation?,
     plan: plan ?? this.plan,
     keepAlive: keepAlive ?? this.keepAlive,
     tags: tags ?? this.tags,

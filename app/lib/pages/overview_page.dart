@@ -2,14 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:iesim_core/iesim_core.dart';
 
 import '../app/app_scope.dart';
-import '../app/brand.dart';
-import '../app/theme.dart';
 import '../data/app_controller.dart';
-import '../widgets/app_logo.dart';
+import '../services/home_action_center.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/profile_card.dart';
 import '../widgets/subscription_card.dart';
+import '../widgets/home_action_center_panel.dart';
+import '../widgets/overview_header.dart';
 import 'data_exchange_page.dart';
+import 'reminders_page.dart';
 import 'subscription_detail_page.dart';
 import 'subscription_form_page.dart';
 
@@ -37,81 +38,100 @@ class _OverviewPageState extends State<OverviewPage> {
   Widget build(BuildContext context) {
     final controller = AppScope.of(context);
     final subscriptions = controller.subscriptions;
+    final homeActions = controller.homeActions;
+    final attentionProfileIds = {
+      for (final action in homeActions)
+        if (action.urgency != HomeActionUrgency.data) action.subscriptionId,
+    };
+    final missingDataProfileIds = {
+      for (final action in homeActions)
+        if (action.urgency == HomeActionUrgency.data) action.subscriptionId,
+    };
+    final actionRankByProfile = <String, int>{};
+    for (final action in homeActions) {
+      final rank = action.urgency.index;
+      final previous = actionRankByProfile[action.subscriptionId];
+      if (previous == null || rank < previous) {
+        actionRankByProfile[action.subscriptionId] = rank;
+      }
+    }
     final profiles = controller.assets.profiles;
     final claimedProfileIds = <String>{};
     final entries = <_ProfileEntry>[];
+    var activeCount = 0;
+    var pendingCount = 0;
+    var museumCount = 0;
+    void addEntry(_ProfileEntry entry) {
+      entries.add(entry);
+      switch (entry.stage) {
+        case ProfileStage.active:
+          activeCount++;
+        case ProfileStage.pendingActivation:
+          pendingCount++;
+        case ProfileStage.museum:
+          museumCount++;
+      }
+    }
+
     for (final subscription in subscriptions) {
-      EsimProfile? profile;
-      for (final candidate in profiles) {
-        if (candidate.subscriptionId == subscription.id) {
-          profile = candidate;
-          break;
-        }
-      }
-      final subscriptionIccid = subscription.iccid;
-      if (profile == null && subscriptionIccid != null) {
-        for (final candidate in profiles) {
-          if (candidate.subscriptionId == null &&
-              candidate.iccid == subscriptionIccid) {
-            profile = candidate;
-            break;
-          }
-        }
-      }
+      final profile = controller.assetProfileForSubscription(subscription);
       if (profile != null) claimedProfileIds.add(profile.id);
-      entries.add(_ProfileEntry(subscription: subscription, profile: profile));
+      addEntry(_ProfileEntry(subscription: subscription, profile: profile));
     }
     for (final profile in profiles) {
       if (!claimedProfileIds.contains(profile.id)) {
-        entries.add(_ProfileEntry(profile: profile));
+        addEntry(_ProfileEntry(profile: profile));
       }
     }
-    final activeCount = entries
-        .where((entry) => entry.stage == ProfileStage.active)
-        .length;
-    final pendingCount = entries
-        .where((entry) => entry.stage == ProfileStage.pendingActivation)
-        .length;
-    final museumCount = entries
-        .where((entry) => entry.stage == ProfileStage.museum)
-        .length;
+    final riskRankByProfile = {
+      for (final subscription in subscriptions)
+        subscription.id:
+            actionRankByProfile[subscription.id] ??
+            4 + _riskRank(controller.statusOf(subscription)),
+    };
+    final query = _search.text.trim().toLowerCase();
     final matches =
         entries
             .where((entry) {
               if (entry.stage != _stage) return false;
-              final query = _search.text.trim().toLowerCase();
-              final searchable = [
-                entry.subscription?.number.value ?? '',
-                entry.subscription?.operator ?? '',
-                entry.subscription?.details.profileName ?? '',
-                entry.subscription?.plan.name ?? '',
-                entry.subscription?.tags.join(' ') ?? '',
-                entry.subscription?.iccid ?? '',
-                entry.profile?.operatorName ?? '',
-                entry.profile?.nickname ?? '',
-                entry.profile?.iccid ?? '',
-              ].join(' ').toLowerCase();
-              if (query.isNotEmpty && !searchable.contains(query)) return false;
-              final status =
-                  entry.subscription == null ||
-                      entry.stage != ProfileStage.active
-                  ? null
-                  : controller.statusOf(entry.subscription!);
+              if (query.isNotEmpty) {
+                final searchable = [
+                  entry.subscription?.number.value ?? '',
+                  entry.subscription?.operator ?? '',
+                  entry.subscription?.details.profileName ?? '',
+                  entry.subscription?.plan.name ?? '',
+                  entry.subscription?.tags.join(' ') ?? '',
+                  entry.subscription?.iccid ?? '',
+                  entry.profile?.operatorName ?? '',
+                  entry.profile?.nickname ?? '',
+                  if (controller.showNekokoTags)
+                    entry.profile?.nekokoTagsRaw ?? '',
+                  entry.profile?.iccid ?? '',
+                ].join(' ').toLowerCase();
+                if (!searchable.contains(query)) return false;
+              }
               return switch (_filter) {
                 _Filter.all => true,
-                _Filter.attention => status is DueSoon || status is Overdue,
+                _Filter.attention =>
+                  entry.subscription != null &&
+                      attentionProfileIds.contains(entry.subscription!.id),
                 _Filter.safe =>
-                  status == null || status is Safe || status is NotRequired,
-                _Filter.unknown => status is Unknown,
+                  entry.subscription == null ||
+                      (!attentionProfileIds.contains(entry.subscription!.id) &&
+                          !missingDataProfileIds.contains(
+                            entry.subscription!.id,
+                          )),
+                _Filter.unknown =>
+                  entry.subscription != null &&
+                      missingDataProfileIds.contains(entry.subscription!.id),
               };
             })
             .toList(growable: false)
           ..sort((a, b) {
             if (a.isPinned != b.isPinned) return a.isPinned ? -1 : 1;
-            final risk = _entryRiskRank(
-              a,
-              controller.statusOf,
-            ).compareTo(_entryRiskRank(b, controller.statusOf));
+            final risk = (riskRankByProfile[a.subscription?.id] ?? 6).compareTo(
+              riskRankByProfile[b.subscription?.id] ?? 6,
+            );
             if (risk != 0) return risk;
             return b.updatedAt.compareTo(a.updatedAt);
           });
@@ -119,19 +139,16 @@ class _OverviewPageState extends State<OverviewPage> {
     final activeSubscriptions = subscriptions.where(
       (item) => item.lifecycle.stage == ProfileStage.active,
     );
-    final urgent = activeSubscriptions.where((item) {
-      final status = controller.statusOf(item);
-      return status is DueSoon || status is Overdue;
-    }).length;
+    final urgent = homeActions
+        .where((item) => item.urgency != HomeActionUrgency.data)
+        .length;
     final safe =
         activeSubscriptions.where((item) {
-          final status = controller.statusOf(item);
-          return status is Safe || status is NotRequired;
+          return !attentionProfileIds.contains(item.id) &&
+              !missingDataProfileIds.contains(item.id);
         }).length +
         entries.where((item) => item.subscription == null).length;
-    final unknown = activeSubscriptions
-        .where((item) => controller.statusOf(item) is Unknown)
-        .length;
+    final unknown = missingDataProfileIds.length;
 
     return Scaffold(
       body: SafeArea(
@@ -150,15 +167,32 @@ class _OverviewPageState extends State<OverviewPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _BrandHeader(onAdd: () => _openForm(context)),
-                          const SizedBox(height: 18),
-                          _OverviewHero(
+                          OverviewHeader(
                             total: entries.length,
                             urgent: urgent,
                             safe: safe,
                             unknown: unknown,
                             onAdd: () => _openForm(context),
                             onImport: () => _openImport(context),
+                          ),
+                          const SizedBox(height: 14),
+                          HomeActionCenterPanel(
+                            actions: homeActions,
+                            subscriptionFor: controller.subscriptionById,
+                            onOpen: (action) => Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                builder: (_) => SubscriptionDetailPage(
+                                  subscriptionId: action.subscriptionId,
+                                ),
+                              ),
+                            ),
+                            onViewAll: () => Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                builder: (_) => const RemindersPage(),
+                              ),
+                            ),
                           ),
                           const SizedBox(height: 22),
                           SingleChildScrollView(
@@ -339,6 +373,9 @@ class _OverviewPageState extends State<OverviewPage> {
                               ? SubscriptionCard(
                                   subscription: subscription,
                                   status: controller.statusOf(subscription),
+                                  nekokoTagsRaw: controller.showNekokoTags
+                                      ? profile?.nekokoTagsRaw
+                                      : null,
                                   onTap: () => Navigator.push(
                                     context,
                                     MaterialPageRoute<void>(
@@ -350,10 +387,8 @@ class _OverviewPageState extends State<OverviewPage> {
                                 )
                               : ProfileCard(
                                   profile: profile!,
-                                  eid: _eidFor(
-                                    controller.assets,
-                                    profile.eidId,
-                                  ),
+                                  eid: controller.assets.eidById(profile.eidId),
+                                  showNekokoTags: controller.showNekokoTags,
                                   onTap: () => showModalBottomSheet<void>(
                                     context: context,
                                     showDragHandle: true,
@@ -361,8 +396,9 @@ class _OverviewPageState extends State<OverviewPage> {
                                     builder: (sheetContext) =>
                                         ProfileDetailsSheet(
                                           profile: profile,
-                                          eid: _eidFor(
-                                            controller.assets,
+                                          showNekokoTags:
+                                              controller.showNekokoTags,
+                                          eid: controller.assets.eidById(
                                             profile.eidId,
                                           ),
                                           onTogglePin: () =>
@@ -420,19 +456,6 @@ class _OverviewPageState extends State<OverviewPage> {
     NotRequired() => 4,
   };
 
-  static int _entryRiskRank(
-    _ProfileEntry entry,
-    KeepAliveStatus Function(Subscription subscription) statusOf,
-  ) =>
-      entry.subscription == null ? 3 : _riskRank(statusOf(entry.subscription!));
-
-  static Euicc? _eidFor(AssetInventory inventory, String eidId) {
-    for (final eid in inventory.eids) {
-      if (eid.id == eidId) return eid;
-    }
-    return null;
-  }
-
   static String _stageTitle(ProfileStage stage) => switch (stage) {
     ProfileStage.active => '已激活 Profile',
     ProfileStage.pendingActivation => '未激活 Profile',
@@ -460,269 +483,6 @@ class _ProfileEntry {
 
   bool get isPinned =>
       subscription?.details.isPinned ?? profile?.isPinned ?? false;
-}
-
-class _BrandHeader extends StatelessWidget {
-  const _BrandHeader({required this.onAdd});
-
-  final VoidCallback onAdd;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        const AppLogo(size: 46),
-        const SizedBox(width: 13),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                AppBrand.name,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 1),
-              Text(
-                AppBrand.tagline,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-          decoration: BoxDecoration(
-            color: scheme.primaryContainer,
-            borderRadius: BorderRadius.circular(999),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.lock_outline_rounded, size: 15, color: scheme.primary),
-              const SizedBox(width: 5),
-              Text(
-                '本地优先',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: scheme.primary,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        IconButton.filledTonal(
-          tooltip: '添加 Profile',
-          onPressed: onAdd,
-          icon: const Icon(Icons.add_rounded),
-        ),
-      ],
-    );
-  }
-}
-
-class _OverviewHero extends StatelessWidget {
-  const _OverviewHero({
-    required this.total,
-    required this.urgent,
-    required this.safe,
-    required this.unknown,
-    required this.onAdd,
-    required this.onImport,
-  });
-
-  final int total;
-  final int urgent;
-  final int safe;
-  final int unknown;
-  final VoidCallback onAdd;
-  final VoidCallback onImport;
-
-  @override
-  Widget build(BuildContext context) {
-    final title = total == 0
-        ? '从第一张 SIM 开始'
-        : urgent > 0
-        ? '$urgent 项需要处理'
-        : unknown > 0
-        ? '$unknown 个 Profile 待完善'
-        : '所有 Profile 状态良好';
-    final subtitle = total == 0
-        ? '手动记录，或从二维码与外部备份快速导入。'
-        : unknown > 0
-        ? '可补充套餐或保号资料，也可以先保持现状。'
-        : '保号截止和套餐到期都在掌握中。';
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(30),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [AppColors.teal, AppColors.tealDark],
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            right: -44,
-            top: -50,
-            child: Container(
-              width: 170,
-              height: 170,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: AppColors.mintStrong.withValues(alpha: .14),
-                  width: 24,
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            right: 32,
-            top: 34,
-            child: Icon(
-              Icons.wifi_tethering_rounded,
-              size: 42,
-              color: AppColors.mintStrong.withValues(alpha: .23),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(22),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${_greeting()} · 今日概览',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: AppColors.mintStrong,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 7),
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    color: Colors.white,
-                    letterSpacing: -.6,
-                  ),
-                ),
-                const SizedBox(height: 7),
-                Text(
-                  subtitle,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.white.withValues(alpha: .78),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _HeroMetric(value: total, label: '全部'),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _HeroMetric(value: urgent, label: '需关注'),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _HeroMetric(value: safe, label: '状态良好'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.paper,
-                          foregroundColor: AppColors.tealDark,
-                        ),
-                        onPressed: onAdd,
-                        icon: const Icon(Icons.add_rounded),
-                        label: const Text('添加 Profile'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          side: BorderSide(
-                            color: Colors.white.withValues(alpha: .42),
-                          ),
-                        ),
-                        onPressed: onImport,
-                        icon: const Icon(Icons.swap_horiz_rounded),
-                        label: const Text('外部数据'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static String _greeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 6) return '夜深了';
-    if (hour < 11) return '早上好';
-    if (hour < 14) return '中午好';
-    if (hour < 18) return '下午好';
-    return '晚上好';
-  }
-}
-
-class _HeroMetric extends StatelessWidget {
-  const _HeroMetric({required this.value, required this.label});
-
-  final int value;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: .10),
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: Colors.white.withValues(alpha: .12)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '$value',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              color: Colors.white,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: Colors.white.withValues(alpha: .72),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _FilterChip extends StatelessWidget {

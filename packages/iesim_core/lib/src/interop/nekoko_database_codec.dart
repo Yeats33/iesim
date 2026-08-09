@@ -36,7 +36,8 @@ class NekokoImportReport {
 /// Reads a NekokoLPA2 SQLite database export without modifying it.
 ///
 /// Interoperable Profile and inventory fields are normalized into ieSIM's own
-/// domain model: EID/ICCID relations, display name, tags, operator metadata,
+/// domain model: EID/ICCID relations, display name, hidden source tags,
+/// operator metadata,
 /// enabled state, Profile class/size/GID and the optional MSISDN cache. LPA
 /// keys, notification payloads and remote-server history are deliberately
 /// ignored.
@@ -196,11 +197,10 @@ class NekokoDatabaseCodec {
       final provider = providerName ?? sourceName;
       final nickname = _text(row['nickname']);
       final rawTags = _text(row['tags']);
-      final interoperableNickname = _mergeNicknameTags(nickname, rawTags);
+      final nekokoTagsRaw = _structuredTags([nickname, rawTags]);
       final profileName =
           _plainProfileName(nickname) ??
           (sourceName != providerName ? sourceName : null);
-      final tags = _plainTags([nickname, rawTags]);
       final msisdn = msisdnByIccid[iccid];
       final profileClassCode = _integer(row['profileClass']);
       final declaredProfileSize = _integer(row['profileSize']);
@@ -214,11 +214,9 @@ class NekokoDatabaseCodec {
       };
       var subscription = subscriptionsByIccid[iccid];
       if (subscription != null) {
-        final mergedTags = {...subscription.tags, ...tags}.toList();
         subscription = subscription.copyWith(
           operator: subscription.operator ?? provider,
           lifecycle: subscription.lifecycle.copyWith(deviceState: deviceState),
-          tags: mergedTags,
           details: subscription.details.copyWith(
             profileName: subscription.details.profileName ?? profileName,
             profileClassCode:
@@ -262,7 +260,6 @@ class NekokoDatabaseCodec {
           keepAlive: msisdn == null
               ? KeepAlive.notRequired()
               : KeepAlive(required: true, confidence: DataConfidence.confirmed),
-          tags: tags,
           details: SubscriptionDetails(
             profileName: profileName,
             profileClassCode: profileClassCode,
@@ -323,8 +320,10 @@ class NekokoDatabaseCodec {
         eidId: eid.id,
         iccid: iccid,
         operatorName: provider ?? existingProfile?.operatorName,
-        nickname: interoperableNickname ?? existingProfile?.nickname,
+        nickname: profileName ?? existingProfile?.nickname,
+        nekokoTagsRaw: nekokoTagsRaw ?? existingProfile?.nekokoTagsRaw,
         subscriptionId: subscription.id,
+        isPinned: existingProfile?.isPinned ?? false,
         createdAt: existingProfile?.createdAt ?? updatedAt,
         updatedAt:
             existingProfile != null &&
@@ -348,26 +347,14 @@ class NekokoDatabaseCodec {
     );
   }
 
-  static List<String> _plainTags(Iterable<String?> sources) {
-    final result = <String>{};
+  static String? _structuredTags(Iterable<String?> sources) {
+    final result = <NekokoTag>{};
     for (final source in sources) {
       if (source == null) continue;
-      final decoded = NekokoTagCodec.decode(source);
-      for (final tag in decoded.tags) {
-        if (tag case NekokoTextTag(value: final value)) result.add(value);
-      }
+      result.addAll(NekokoTagCodec.decode(source).tags);
     }
-    return result.toList();
-  }
-
-  static String? _mergeNicknameTags(String? nickname, String? rawTags) {
-    if (rawTags == null) return nickname;
-    if (nickname == null) return rawTags;
-    final missing = rawTags
-        .split(RegExp(r'\s+'))
-        .where((tag) => tag.isNotEmpty && !nickname.contains(tag));
-    final suffix = missing.join(' ');
-    return suffix.isEmpty ? nickname : '$nickname $suffix';
+    final encoded = NekokoTagCodec.encode(result);
+    return encoded.isEmpty ? null : encoded;
   }
 
   static String? _plainProfileName(String? nickname) {

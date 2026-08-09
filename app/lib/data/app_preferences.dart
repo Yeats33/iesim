@@ -7,6 +7,7 @@ class AppPreferences {
   static const _themeKey = 'appearance.theme_mode';
   static const _remindersKey = 'reminders.enabled';
   static const _museumAutoArchiveDaysKey = 'profiles.museum_auto_archive_days';
+  static const _showNekokoTagsKey = 'interop.show_nekoko_tags';
 
   final SharedPreferences _preferences;
 
@@ -20,6 +21,8 @@ class AppPreferences {
   };
 
   bool get remindersEnabled => _preferences.getBool(_remindersKey) ?? true;
+
+  bool get showNekokoTags => _preferences.getBool(_showNekokoTagsKey) ?? false;
 
   /// `null` 表示永不自动归档；新安装默认在 Profile 服务到期 90 天后归档。
   int? get museumAutoArchiveDays {
@@ -36,4 +39,7 @@ class AppPreferences {
 
   Future<void> setMuseumAutoArchiveDays(int? value) =>
       _preferences.setInt(_museumAutoArchiveDaysKey, value ?? -1);
+
+  Future<void> setShowNekokoTags(bool value) =>
+      _preferences.setBool(_showNekokoTagsKey, value);
 }

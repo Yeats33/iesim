@@ -6,6 +6,8 @@ import 'package:uuid/uuid.dart';
 import '../app/app_scope.dart';
 import '../app/theme.dart';
 import '../data/euicc_card_presets.dart';
+import '../services/compatibility_assistant.dart';
+import '../services/euicc_card_preset_service.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/section_card.dart';
 import 'device_preset_picker_page.dart';
@@ -317,9 +319,30 @@ class _CardsTab extends StatelessWidget {
               ),
               leading: CircleAvatar(child: Icon(_cardIcon(card.kind))),
               title: Text(card.name),
-              subtitle: Text(
-                '${_cardKindLabel(card.kind)} · ${_locationLabel(inventory, slot)}'
-                '${eids.isEmpty ? '' : ' · ${eids.length} EID / $profileCount Profile'}',
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${_cardKindLabel(card.kind)} · '
+                      '${_locationLabel(inventory, slot)}',
+                    ),
+                    const SizedBox(height: 4),
+                    if (eids.isEmpty)
+                      Text(
+                        card is PhysicalSimCard ? '普通实体 SIM · 无 EID' : '暂无 EID',
+                      )
+                    else
+                      for (final eid in eids)
+                        Text(
+                          '${eid.label ?? 'EID'} · ${eid.value}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    if (profileCount > 0) Text('$profileCount 个 Profile'),
+                  ],
+                ),
               ),
               trailing: card is EmbeddedEuiccCard
                   ? const Row(
@@ -394,11 +417,10 @@ class _DeviceDetailPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = AppScope.of(context);
     final inventory = controller.assets;
-    final matches = inventory.devices.where((item) => item.id == deviceId);
-    if (matches.isEmpty) {
+    final device = inventory.deviceById(deviceId);
+    if (device == null) {
       return const Scaffold(body: Center(child: Text('设备已不存在')));
     }
-    final device = matches.single;
     final slots = inventory.slotsForDevice(device.id).toList()
       ..sort((a, b) => a.position.compareTo(b.position));
     return Scaffold(
@@ -449,6 +471,13 @@ class _DeviceDetailPage extends StatelessWidget {
                 ),
                 if (device.region != null)
                   InfoRow(label: '地区', value: device.region!),
+                if (device.usage != null)
+                  InfoRow(label: '用途', value: device.usage!),
+                InfoRow(
+                  label: '5G SA 漫游',
+                  value: device.supportsSaRoaming ? '支持' : '不支持 / 未确认',
+                ),
+                InfoRow(label: '排序位置', value: '${device.orderIndex}'),
                 if (device.note != null)
                   InfoRow(label: '备注', value: device.note!),
               ],
@@ -489,19 +518,19 @@ class _DeviceDetailPage extends StatelessWidget {
     DeviceAsset device,
     int position,
   ) async {
-    final label = await showDialog<String>(
+    final result = await showDialog<(String, SimSlotKind, int)>(
       context: context,
-      builder: (_) => const _SlotDialog(),
+      builder: (_) => _SlotDialog(position: position),
     );
-    if (label == null || !context.mounted) return;
+    if (result == null || !context.mounted) return;
     final now = DateTime.now().toUtc();
     final error = await AppScope.of(context).saveSlot(
       SimSlot(
         id: const Uuid().v4(),
         deviceId: device.id,
-        label: label,
-        kind: SimSlotKind.physical,
-        position: position,
+        label: result.$1,
+        kind: result.$2,
+        position: result.$3,
         createdAt: now,
         updatedAt: now,
       ),
@@ -609,12 +638,22 @@ class _SlotTile extends StatelessWidget {
                       ? '尚未绑定内置 eUICC'
                       : '空卡槽'),
       ),
-      trailing: Icon(
-        card is EmbeddedEuiccCard
-            ? Icons.lock_outline_rounded
-            : slot.kind == SimSlotKind.embeddedEuicc
-            ? Icons.add_circle_outline_rounded
-            : Icons.swap_horiz_rounded,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: '编辑卡槽',
+            onPressed: () => _edit(context),
+            icon: const Icon(Icons.edit_outlined),
+          ),
+          Icon(
+            card is EmbeddedEuiccCard
+                ? Icons.lock_outline_rounded
+                : slot.kind == SimSlotKind.embeddedEuicc
+                ? Icons.add_circle_outline_rounded
+                : Icons.swap_horiz_rounded,
+          ),
+        ],
       ),
       onTap: card is EmbeddedEuiccCard
           ? () => Navigator.push(
@@ -675,6 +714,27 @@ class _SlotTile extends StatelessWidget {
     if (context.mounted) _message(context, error ?? '位置已更新');
   }
 
+  Future<void> _edit(BuildContext context) async {
+    final result = await showDialog<(String, SimSlotKind, int)>(
+      context: context,
+      builder: (_) => _SlotDialog(existing: slot, position: slot.position),
+    );
+    if (result == null || !context.mounted) return;
+    final error = await AppScope.of(context).saveSlot(
+      SimSlot(
+        id: slot.id,
+        deviceId: slot.deviceId,
+        label: result.$1,
+        kind: result.$2,
+        position: result.$3,
+        cardId: slot.cardId,
+        createdAt: slot.createdAt,
+        updatedAt: DateTime.now().toUtc(),
+      ),
+    );
+    if (context.mounted) _message(context, error ?? '卡槽已更新');
+  }
+
   Future<void> _delete(BuildContext context) async {
     final confirmed = await _confirm(
       context,
@@ -702,37 +762,39 @@ class _CardDetailPage extends StatelessWidget {
     }
     final slot = inventory.slotHolding(card.id);
     final eids = inventory.eidsForCard(card.id).toList();
-    final preset = euiccCardPresetById(card.presetId);
+    final preset = euiccCardPresetById(
+      card.presetId,
+      presets: AppScope.of(context).euiccCardPresetResult.catalog.cards,
+    );
     return Scaffold(
       appBar: AppBar(
         title: Text(card.name),
-        actions: card is EmbeddedEuiccCard
-            ? null
-            : [
-                IconButton(
-                  tooltip: '编辑卡片',
-                  icon: const Icon(Icons.edit_outlined),
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => _CardFormPage(existing: card),
-                    ),
-                  ),
-                ),
-                PopupMenuButton<String>(
-                  onSelected: (value) async {
-                    if (value == 'move') {
-                      await _moveCard(context, inventory, card, slot);
-                    } else if (value == 'delete') {
-                      await _deleteCard(context, card, slot);
-                    }
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'move', child: Text('移动卡片')),
-                    PopupMenuItem(value: 'delete', child: Text('删除卡片')),
-                  ],
-                ),
+        actions: [
+          IconButton(
+            tooltip: '编辑卡片',
+            icon: const Icon(Icons.edit_outlined),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => _CardFormPage(existing: card),
+              ),
+            ),
+          ),
+          if (card is! EmbeddedEuiccCard)
+            PopupMenuButton<String>(
+              onSelected: (value) async {
+                if (value == 'move') {
+                  await _moveCard(context, inventory, card, slot);
+                } else if (value == 'delete') {
+                  await _deleteCard(context, card, slot);
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'move', child: Text('移动卡片')),
+                PopupMenuItem(value: 'delete', child: Text('删除卡片')),
               ],
+            ),
+        ],
       ),
       body: ListView(
         padding: EdgeInsets.fromLTRB(
@@ -749,8 +811,7 @@ class _CardDetailPage extends StatelessWidget {
               children: [
                 if (card is EmbeddedEuiccCard)
                   const InfoRow(label: '安装方式', value: '与设备永久绑定，不可移出或换卡'),
-                if (card.physicalIccid != null)
-                  InfoRow(label: 'ICCID', value: card.physicalIccid!),
+                InfoRow(label: 'EID 数量', value: '${eids.length}'),
                 if (card.note != null) InfoRow(label: '备注', value: card.note!),
               ],
             ),
@@ -761,8 +822,8 @@ class _CardDetailPage extends StatelessWidget {
           ],
           const SizedBox(height: 14),
           SectionCard(
-            title: 'EID 与 Profile',
-            subtitle: 'Profile 通过 ICCID 或订阅建立关联',
+            title: 'EID',
+            subtitle: '一张 eUICC 卡片可包含多个 EID；每个 EID 下可管理多个 Profile',
             trailing: card is PhysicalSimCard
                 ? null
                 : IconButton(
@@ -849,19 +910,18 @@ class _CardDetailPage extends StatelessWidget {
   }
 
   static Future<void> _addEid(BuildContext context, SimCard card) async {
-    final value = await _textDialog(
-      context,
-      title: '添加 EID',
-      label: 'EID',
-      hint: '通常为 32 位数字',
+    final result = await showDialog<(String, String?)>(
+      context: context,
+      builder: (_) => const _EidDialog(),
     );
-    if (value == null || !context.mounted) return;
+    if (result == null || !context.mounted) return;
     final now = DateTime.now().toUtc();
     final error = await AppScope.of(context).saveEid(
       Euicc(
         id: const Uuid().v4(),
         cardId: card.id,
-        value: value,
+        value: result.$1,
+        label: result.$2,
         createdAt: now,
         updatedAt: now,
       ),
@@ -889,6 +949,11 @@ class _EidPanel extends StatelessWidget {
                 eid.label ?? 'EID ${_redact(eid.value)}',
                 style: Theme.of(context).textTheme.titleSmall,
               ),
+            ),
+            IconButton(
+              tooltip: '编辑 EID',
+              onPressed: () => _editEid(context),
+              icon: const Icon(Icons.edit_outlined),
             ),
             IconButton(
               tooltip: '添加 Profile',
@@ -959,6 +1024,25 @@ class _EidPanel extends StatelessWidget {
     );
   }
 
+  Future<void> _editEid(BuildContext context) async {
+    final result = await showDialog<(String, String?)>(
+      context: context,
+      builder: (_) => _EidDialog(existing: eid),
+    );
+    if (result == null || !context.mounted) return;
+    final error = await AppScope.of(context).saveEid(
+      Euicc(
+        id: eid.id,
+        cardId: eid.cardId,
+        value: result.$1,
+        label: result.$2,
+        createdAt: eid.createdAt,
+        updatedAt: DateTime.now().toUtc(),
+      ),
+    );
+    if (context.mounted) _message(context, error ?? 'EID 已更新');
+  }
+
   Future<void> _deleteEid(BuildContext context) async {
     final confirmed = await _confirm(
       context,
@@ -980,9 +1064,27 @@ class _EidPanel extends StatelessWidget {
       return;
     }
     if (action == 'move') {
-      final candidates = inventory.eids
-          .where((item) => item.id != profile.eidId)
-          .toList();
+      final controller = AppScope.of(context);
+      final linked = profile.subscriptionId == null
+          ? null
+          : controller.subscriptionById(profile.subscriptionId!);
+      final assistant = EuiccCompatibilityAssistant(
+        inventory: inventory,
+        subscriptions: controller.subscriptions,
+        presets: controller.euiccCardPresetResult.catalog.cards,
+      );
+      final candidates = [
+        for (final item in inventory.eids)
+          if (item.id != profile.eidId)
+            (
+              eid: item,
+              assessment: assistant.assess(
+                eidId: item.id,
+                subscription: linked,
+                currentAssetProfileId: profile.id,
+              ),
+            ),
+      ];
       final target = await showModalBottomSheet<String>(
         context: context,
         showDragHandle: true,
@@ -990,11 +1092,26 @@ class _EidPanel extends StatelessWidget {
           child: ListView(
             shrinkWrap: true,
             children: [
-              for (final item in candidates)
+              for (final candidate in candidates)
                 ListTile(
-                  title: Text(item.label ?? _redact(item.value)),
-                  subtitle: Text(_redact(item.value)),
-                  onTap: () => Navigator.pop(sheetContext, item.id),
+                  leading: Icon(switch (candidate.assessment.severity) {
+                    CompatibilitySeverity.compatible => Icons.verified_outlined,
+                    CompatibilitySeverity.caution =>
+                      Icons.warning_amber_rounded,
+                    CompatibilitySeverity.blocked => Icons.block_rounded,
+                  }),
+                  title: Text(
+                    candidate.eid.label ?? _redact(candidate.eid.value),
+                  ),
+                  subtitle: Text(
+                    '${candidate.assessment.shortLabel} · '
+                    '${candidate.assessment.primaryMessage}\n'
+                    '${_redact(candidate.eid.value)}',
+                  ),
+                  isThreeLine: true,
+                  onTap: candidate.assessment.canProceed
+                      ? () => Navigator.pop(sheetContext, candidate.eid.id)
+                      : null,
                 ),
               if (candidates.isEmpty)
                 const Padding(
@@ -1006,9 +1123,19 @@ class _EidPanel extends StatelessWidget {
         ),
       );
       if (target == null || !context.mounted) return;
-      final error = await AppScope.of(
-        context,
-      ).moveProfile(profileId: profile.id, toEidId: target);
+      final assessment = assistant.assess(
+        eidId: target,
+        subscription: linked,
+        currentAssetProfileId: profile.id,
+      );
+      if (assessment.severity == CompatibilitySeverity.caution) {
+        final confirmed = await _confirmCompatibilityMove(context, assessment);
+        if (!confirmed || !context.mounted) return;
+      }
+      final error = await controller.moveProfile(
+        profileId: profile.id,
+        toEidId: target,
+      );
       if (context.mounted) _message(context, error ?? 'Profile 已迁移');
       return;
     }
@@ -1021,6 +1148,42 @@ class _EidPanel extends StatelessWidget {
     final error = await AppScope.of(context).wipeProfile(profile.id);
     if (context.mounted) _message(context, error ?? 'Profile 已从资产记录移除');
   }
+
+  static Future<bool> _confirmCompatibilityMove(
+    BuildContext context,
+    CompatibilityAssessment assessment,
+  ) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('迁移前确认'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final finding in assessment.findings.where(
+                (item) => item.severity == CompatibilitySeverity.caution,
+              ))
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.warning_amber_rounded),
+                  title: Text(finding.title),
+                  subtitle: Text(finding.detail),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('仍然迁移'),
+            ),
+          ],
+        ),
+      ) ??
+      false;
 }
 
 class _DeviceFormPage extends StatefulWidget {
@@ -1038,6 +1201,7 @@ class _DeviceFormPageState extends State<_DeviceFormPage> {
   late final TextEditingController _note;
   late final TextEditingController _region;
   late final TextEditingController _usage;
+  late final TextEditingController _orderIndex;
   late DeviceKind _kind;
   late SimCapability _capability;
   late bool _supportsSaRoaming;
@@ -1054,6 +1218,7 @@ class _DeviceFormPageState extends State<_DeviceFormPage> {
     _note = TextEditingController(text: item?.note);
     _region = TextEditingController(text: item?.region);
     _usage = TextEditingController(text: item?.usage);
+    _orderIndex = TextEditingController(text: item?.orderIndex.toString());
     _kind = item?.kind ?? DeviceKind.phone;
     _capability = item?.simCapability ?? SimCapability.physicalPlusEsim;
     _supportsSaRoaming = item?.supportsSaRoaming ?? false;
@@ -1066,6 +1231,7 @@ class _DeviceFormPageState extends State<_DeviceFormPage> {
     _note.dispose();
     _region.dispose();
     _usage.dispose();
+    _orderIndex.dispose();
     super.dispose();
   }
 
@@ -1150,6 +1316,15 @@ class _DeviceFormPageState extends State<_DeviceFormPage> {
               hintText: '例如主力机、备用机、出差路由器',
             ),
           ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _orderIndex,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: '排序位置（可选）',
+              helperText: '从 0 开始；留空时新设备自动排在最后',
+            ),
+          ),
           const SizedBox(height: 6),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
@@ -1186,6 +1361,15 @@ class _DeviceFormPageState extends State<_DeviceFormPage> {
       _message(context, '请填写设备名称');
       return;
     }
+    final enteredOrder = _orderIndex.text.trim();
+    final parsedOrder = enteredOrder.isEmpty
+        ? null
+        : int.tryParse(enteredOrder);
+    if ((parsedOrder != null && parsedOrder < 0) ||
+        (enteredOrder.isNotEmpty && parsedOrder == null)) {
+      _message(context, '排序位置必须是非负整数');
+      return;
+    }
     setState(() => _saving = true);
     final controller = AppScope.of(context);
     final existing = widget.existing;
@@ -1200,7 +1384,10 @@ class _DeviceFormPageState extends State<_DeviceFormPage> {
       usage: _optional(_usage.text),
       simCapability: _capability,
       supportsSaRoaming: _supportsSaRoaming,
-      orderIndex: existing?.orderIndex ?? controller.assets.devices.length,
+      orderIndex:
+          parsedOrder ??
+          existing?.orderIndex ??
+          controller.assets.devices.length,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     );
@@ -1267,32 +1454,48 @@ class _CardFormPage extends StatefulWidget {
 
 class _CardFormPageState extends State<_CardFormPage> {
   late final TextEditingController _name;
-  late final TextEditingController _iccid;
   late final TextEditingController _note;
   late SimCardKind _kind;
   EuiccCardPreset? _selectedPreset;
+  bool _presetInitialized = false;
   bool _saving = false;
 
   @override
   void initState() {
     super.initState();
     _name = TextEditingController(text: widget.existing?.name);
-    _iccid = TextEditingController(text: widget.existing?.physicalIccid);
     _note = TextEditingController(text: widget.existing?.note);
     _kind = widget.existing?.kind ?? SimCardKind.physicalSim;
     _selectedPreset = euiccCardPresetById(widget.existing?.presetId);
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_presetInitialized) return;
+    _presetInitialized = true;
+    _selectedPreset = euiccCardPresetById(
+      widget.existing?.presetId,
+      presets: AppScope.of(context).euiccCardPresetResult.catalog.cards,
+    );
+  }
+
+  @override
   void dispose() {
     _name.dispose();
-    _iccid.dispose();
     _note.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final existing = widget.existing;
+    final hasEids =
+        existing != null &&
+        AppScope.of(context).assets.eidsForCard(existing.id).isNotEmpty;
+    final kindLocked =
+        existing is EmbeddedEuiccCard ||
+        (hasEids && existing is! PhysicalSimCard);
     return Scaffold(
       appBar: AppBar(title: Text(widget.existing == null ? '添加卡片' : '编辑卡片')),
       body: ListView(
@@ -1305,26 +1508,43 @@ class _CardFormPageState extends State<_CardFormPage> {
           ),
           const SizedBox(height: 14),
           DropdownButtonFormField<SimCardKind>(
+            key: ValueKey(_kind),
             initialValue: _kind,
-            decoration: const InputDecoration(labelText: '卡片类型'),
-            items: const [
-              DropdownMenuItem(
-                value: SimCardKind.physicalSim,
-                child: Text('实体 SIM'),
-              ),
-              DropdownMenuItem(
-                value: SimCardKind.removableEuicc,
-                child: Text('可拆卸 eUICC'),
-              ),
+            decoration: InputDecoration(
+              labelText: '卡片类型',
+              helperText: existing is EmbeddedEuiccCard
+                  ? '内置类型由设备绑定关系决定'
+                  : hasEids && existing is PhysicalSimCard
+                  ? '检测到已有 EID，请将类型修正为可拆卸 eUICC'
+                  : hasEids
+                  ? '卡片已有 EID，需先删除 EID 才能更改类型'
+                  : null,
+            ),
+            items: [
+              if (existing is EmbeddedEuiccCard)
+                const DropdownMenuItem(
+                  value: SimCardKind.embeddedEuicc,
+                  child: Text('内置 eUICC'),
+                )
+              else ...const [
+                DropdownMenuItem(
+                  value: SimCardKind.physicalSim,
+                  child: Text('实体 SIM'),
+                ),
+                DropdownMenuItem(
+                  value: SimCardKind.removableEuicc,
+                  child: Text('可拆卸 eUICC'),
+                ),
+              ],
             ],
-            onChanged: widget.existing == null
-                ? (value) => setState(() {
+            onChanged: kindLocked
+                ? null
+                : (value) => setState(() {
                     _kind = value ?? _kind;
                     if (_kind != SimCardKind.removableEuicc) {
                       _selectedPreset = null;
                     }
-                  })
-                : null,
+                  }),
           ),
           if (_kind == SimCardKind.removableEuicc) ...[
             const SizedBox(height: 14),
@@ -1345,16 +1565,6 @@ class _CardFormPageState extends State<_CardFormPage> {
           ],
           const SizedBox(height: 14),
           TextField(
-            controller: _iccid,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              labelText: _kind == SimCardKind.physicalSim
-                  ? 'ICCID *'
-                  : '卡片 ICCID（可选）',
-            ),
-          ),
-          const SizedBox(height: 14),
-          TextField(
             controller: _note,
             maxLines: 3,
             decoration: const InputDecoration(labelText: '备注（可选）'),
@@ -1372,9 +1582,8 @@ class _CardFormPageState extends State<_CardFormPage> {
 
   Future<void> _save() async {
     final name = _name.text.trim();
-    final iccid = _optional(_iccid.text);
-    if (name.isEmpty || (_kind == SimCardKind.physicalSim && iccid == null)) {
-      _message(context, '请填写卡片名称和必填 ICCID');
+    if (name.isEmpty) {
+      _message(context, '请填写卡片名称');
       return;
     }
     setState(() => _saving = true);
@@ -1388,7 +1597,7 @@ class _CardFormPageState extends State<_CardFormPage> {
       SimCardKind.physicalSim => PhysicalSimCard(
         id: common.id,
         name: name,
-        physicalIccid: iccid!,
+        physicalIccid: existing?.physicalIccid,
         note: _optional(_note.text),
         createdAt: common.createdAt,
         updatedAt: now,
@@ -1396,13 +1605,21 @@ class _CardFormPageState extends State<_CardFormPage> {
       SimCardKind.removableEuicc => RemovableEuiccCard(
         id: common.id,
         name: name,
-        physicalIccid: iccid,
+        physicalIccid: existing?.physicalIccid,
         note: _optional(_note.text),
         presetId: _selectedPreset?.id,
         createdAt: common.createdAt,
         updatedAt: now,
       ),
-      SimCardKind.embeddedEuicc => throw StateError('内置 eUICC 需从设备页添加'),
+      SimCardKind.embeddedEuicc => EmbeddedEuiccCard(
+        id: common.id,
+        name: name,
+        note: _optional(_note.text),
+        presetId: existing?.presetId,
+        embeddedDeviceId: (existing as EmbeddedEuiccCard).embeddedDeviceId,
+        createdAt: common.createdAt,
+        updatedAt: now,
+      ),
     };
     final error = await AppScope.of(context).saveCard(card);
     if (!mounted) return;
@@ -1415,6 +1632,10 @@ class _CardFormPageState extends State<_CardFormPage> {
   }
 
   Future<void> _choosePreset() async {
+    final controller = AppScope.of(context);
+    final refreshWarning = await controller.refreshEuiccCardPresets();
+    if (!mounted) return;
+    final result = controller.euiccCardPresetResult;
     final selected = await showModalBottomSheet<EuiccCardPreset>(
       context: context,
       showDragHandle: true,
@@ -1434,6 +1655,12 @@ class _CardFormPageState extends State<_CardFormPage> {
                   ),
                   const SizedBox(height: 5),
                   Text(
+                    '${switch (result.source) {
+                      EuiccCardPresetSource.network => '已在线更新',
+                      EuiccCardPresetSource.cache => '本地缓存',
+                      EuiccCardPresetSource.builtIn => 'ieSIM 内置目录',
+                    }} · ${result.catalog.catalogVersion} · '
+                    '${result.catalog.cards.length} 个型号\n'
                     '以下购买入口为推广链接，9eSIM 与 eSTK.me 均享 9 折。',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -1442,14 +1669,28 @@ class _CardFormPageState extends State<_CardFormPage> {
                 ],
               ),
             ),
-            for (final preset in builtinEuiccCardPresets)
+            if (refreshWarning != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+                child: Text(
+                  refreshWarning,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            for (final preset in result.catalog.cards)
               Card(
                 child: ListTile(
                   leading: const CircleAvatar(
                     child: Icon(Icons.sd_card_outlined),
                   ),
-                  title: Text(preset.brand),
-                  subtitle: Text('${preset.description}\n推广链接 · 9 折'),
+                  title: Text(preset.displayName),
+                  subtitle: Text(
+                    '${preset.storageLabel} · ${preset.profileCapacityLabel}\n'
+                    '${preset.managementLabel}\n推广链接 · 9 折',
+                  ),
                   isThreeLine: true,
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => Navigator.pop(sheetContext, preset),
@@ -1504,11 +1745,20 @@ class _SelectedEuiccPreset extends StatelessWidget {
             ],
           ),
           Text(preset.description),
+          const SizedBox(height: 6),
+          Text(
+            preset.managementLabel,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: scheme.onSecondaryContainer),
+          ),
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
+              Chip(label: Text(preset.storageLabel)),
+              Chip(label: Text(preset.profileCapacityLabel)),
               Chip(
                 avatar: const Icon(Icons.sell_outlined, size: 17),
                 label: const Text('推广链接 · 9 折'),
@@ -1518,11 +1768,22 @@ class _SelectedEuiccPreset extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          FilledButton.tonalIcon(
-            onPressed: () =>
-                _openAffiliateLink(context, preset.affiliateOffer.url),
-            icon: const Icon(Icons.open_in_new_rounded),
-            label: const Text('打开 9 折购买链接'),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              FilledButton.tonalIcon(
+                onPressed: () =>
+                    _openExternalLink(context, preset.affiliateOffer.url),
+                icon: const Icon(Icons.shopping_bag_outlined),
+                label: const Text('9 折购买'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => _openExternalLink(context, preset.officialUrl),
+                icon: const Icon(Icons.info_outline_rounded),
+                label: const Text('型号官网'),
+              ),
+            ],
           ),
         ],
       ),
@@ -1537,11 +1798,14 @@ class _EuiccPresetOfferCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SectionCard(
-    title: preset.brand,
-    subtitle: '可拆卸 eUICC 品牌预设',
+    title: preset.displayName,
+    subtitle: '可拆卸 eUICC 具体型号预设',
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        InfoRow(label: '存储容量', value: preset.storageLabel),
+        InfoRow(label: '预计容量', value: preset.profileCapacityLabel),
+        InfoRow(label: '管理方式', value: preset.managementLabel),
         Text(preset.description),
         const SizedBox(height: 12),
         Text(
@@ -1555,11 +1819,22 @@ class _EuiccPresetOfferCard extends StatelessWidget {
           SelectableText('优惠 / 推荐码：$code'),
         ],
         const SizedBox(height: 12),
-        FilledButton.tonalIcon(
-          onPressed: () =>
-              _openAffiliateLink(context, preset.affiliateOffer.url),
-          icon: const Icon(Icons.shopping_bag_outlined),
-          label: const Text('9 折购买（推广链接）'),
+        Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          children: [
+            FilledButton.tonalIcon(
+              onPressed: () =>
+                  _openExternalLink(context, preset.affiliateOffer.url),
+              icon: const Icon(Icons.shopping_bag_outlined),
+              label: const Text('9 折购买（推广链接）'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => _openExternalLink(context, preset.officialUrl),
+              icon: const Icon(Icons.info_outline_rounded),
+              label: const Text('查看型号官网'),
+            ),
+          ],
         ),
       ],
     ),
@@ -1580,6 +1855,7 @@ class _ProfileFormPageState extends State<_ProfileFormPage> {
   late final TextEditingController _iccid;
   late final TextEditingController _operator;
   late final TextEditingController _nickname;
+  late final TextEditingController _nekokoTagsRaw;
   String? _subscriptionId;
   bool _saving = false;
 
@@ -1589,6 +1865,9 @@ class _ProfileFormPageState extends State<_ProfileFormPage> {
     _iccid = TextEditingController(text: widget.existing?.iccid);
     _operator = TextEditingController(text: widget.existing?.operatorName);
     _nickname = TextEditingController(text: widget.existing?.nickname);
+    _nekokoTagsRaw = TextEditingController(
+      text: widget.existing?.nekokoTagsRaw,
+    );
     _subscriptionId = widget.existing?.subscriptionId;
   }
 
@@ -1597,6 +1876,7 @@ class _ProfileFormPageState extends State<_ProfileFormPage> {
     _iccid.dispose();
     _operator.dispose();
     _nickname.dispose();
+    _nekokoTagsRaw.dispose();
     super.dispose();
   }
 
@@ -1654,27 +1934,37 @@ class _ProfileFormPageState extends State<_ProfileFormPage> {
           const SizedBox(height: 14),
           TextField(
             controller: _nickname,
-            maxLines: 3,
             decoration: const InputDecoration(
-              labelText: 'Profile nickname / Nekoko 标签',
-              helperText: '兼容 t:文本 与 d:日期:备注 标签。',
+              labelText: 'Profile 名称',
+              helperText: 'ieSIM 自己的显示名称，不与外部 Tag 混存。',
             ),
           ),
-          if (_subscriptionId != null) ...[
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: () {
-                final sub = choices.singleWhere(
-                  (item) => item.id == _subscriptionId,
-                );
-                _nickname.text = NekokoTagCodec.replaceTags(
-                  _nickname.text,
-                  _tagsForSubscription(sub),
-                );
-              },
-              icon: const Icon(Icons.auto_fix_high_rounded),
-              label: const Text('从订阅生成 Nekoko 标签'),
+          if (controller.showNekokoTags) ...[
+            const SizedBox(height: 14),
+            TextField(
+              controller: _nekokoTagsRaw,
+              minLines: 2,
+              maxLines: 5,
+              decoration: const InputDecoration(
+                labelText: 'Nekoko Tag（外部元数据）',
+                helperText: '可在“设置”中隐藏；隐藏不会删除已经保存的值。',
+              ),
             ),
+            if (_subscriptionId != null) ...[
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: () {
+                  final sub = choices.singleWhere(
+                    (item) => item.id == _subscriptionId,
+                  );
+                  _nekokoTagsRaw.text = NekokoTagCodec.encode(
+                    _tagsForSubscription(sub),
+                  );
+                },
+                icon: const Icon(Icons.auto_fix_high_rounded),
+                label: const Text('从订阅生成 Nekoko Tag'),
+              ),
+            ],
           ],
           const SizedBox(height: 24),
           FilledButton.icon(
@@ -1701,7 +1991,9 @@ class _ProfileFormPageState extends State<_ProfileFormPage> {
       iccid: iccid,
       operatorName: _optional(_operator.text),
       nickname: _optional(_nickname.text),
+      nekokoTagsRaw: _optional(_nekokoTagsRaw.text),
       subscriptionId: _subscriptionId,
+      isPinned: widget.existing?.isPinned ?? false,
       createdAt: widget.existing?.createdAt ?? now,
       updatedAt: now,
     );
@@ -1716,25 +2008,110 @@ class _ProfileFormPageState extends State<_ProfileFormPage> {
   }
 }
 
-class _SlotDialog extends StatefulWidget {
-  const _SlotDialog();
+class _EidDialog extends StatefulWidget {
+  const _EidDialog({this.existing});
+
+  final Euicc? existing;
 
   @override
-  State<_SlotDialog> createState() => _SlotDialogState();
+  State<_EidDialog> createState() => _EidDialogState();
 }
 
-class _SlotDialogState extends State<_SlotDialog> {
-  final _label = TextEditingController(text: 'SIM');
+class _EidDialogState extends State<_EidDialog> {
+  late final TextEditingController _value;
+  late final TextEditingController _label;
+
+  @override
+  void initState() {
+    super.initState();
+    _value = TextEditingController(text: widget.existing?.value);
+    _label = TextEditingController(text: widget.existing?.label);
+  }
 
   @override
   void dispose() {
+    _value.dispose();
     _label.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('添加物理卡槽'),
+    title: Text(widget.existing == null ? '添加 EID' : '编辑 EID'),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextField(
+          controller: _value,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'EID *',
+            hintText: '通常为 32 位数字',
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _label,
+          decoration: const InputDecoration(
+            labelText: '标签（可选）',
+            hintText: '例如主 EID、测试 EID',
+          ),
+        ),
+      ],
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('取消'),
+      ),
+      FilledButton(
+        onPressed: () {
+          final value = _value.text.trim();
+          if (value.isEmpty) return;
+          Navigator.pop(context, (value, _optional(_label.text)));
+        },
+        child: const Text('保存'),
+      ),
+    ],
+  );
+}
+
+class _SlotDialog extends StatefulWidget {
+  const _SlotDialog({this.existing, required this.position});
+
+  final SimSlot? existing;
+  final int position;
+
+  @override
+  State<_SlotDialog> createState() => _SlotDialogState();
+}
+
+class _SlotDialogState extends State<_SlotDialog> {
+  late final TextEditingController _label;
+  late final TextEditingController _position;
+  late SimSlotKind _kind;
+
+  @override
+  void initState() {
+    super.initState();
+    _label = TextEditingController(text: widget.existing?.label ?? 'SIM');
+    _position = TextEditingController(
+      text: (widget.existing?.position ?? widget.position).toString(),
+    );
+    _kind = widget.existing?.kind ?? SimSlotKind.physical;
+  }
+
+  @override
+  void dispose() {
+    _label.dispose();
+    _position.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.existing == null ? '添加卡槽' : '编辑卡槽'),
     content: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1743,8 +2120,35 @@ class _SlotDialogState extends State<_SlotDialog> {
           autofocus: true,
           decoration: const InputDecoration(labelText: '卡槽名称'),
         ),
-        const SizedBox(height: 10),
-        const Text('内置 eSIM 请使用设备菜单中的“添加内置 eSIM 组合”。'),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<SimSlotKind>(
+          initialValue: _kind,
+          decoration: InputDecoration(
+            labelText: '卡槽类型',
+            helperText: widget.existing?.cardId == null
+                ? null
+                : '装有卡片时不能更改卡槽类型',
+          ),
+          items: const [
+            DropdownMenuItem(value: SimSlotKind.physical, child: Text('物理卡槽')),
+            DropdownMenuItem(
+              value: SimSlotKind.embeddedEuicc,
+              child: Text('内置 eSIM 卡槽'),
+            ),
+          ],
+          onChanged: widget.existing?.cardId == null
+              ? (value) => setState(() => _kind = value ?? _kind)
+              : null,
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _position,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: '排序位置',
+            helperText: '从 0 开始，数字较小的卡槽排在前面',
+          ),
+        ),
       ],
     ),
     actions: [
@@ -1755,9 +2159,12 @@ class _SlotDialogState extends State<_SlotDialog> {
       FilledButton(
         onPressed: () {
           final label = _label.text.trim();
-          if (label.isNotEmpty) Navigator.pop(context, label);
+          final position = int.tryParse(_position.text.trim());
+          if (label.isNotEmpty && position != null && position >= 0) {
+            Navigator.pop(context, (label, _kind, position));
+          }
         },
-        child: const Text('添加'),
+        child: const Text('保存'),
       ),
     ],
   );
@@ -1956,47 +2363,15 @@ Future<bool> _confirm(
     ) ??
     false;
 
-Future<String?> _textDialog(
-  BuildContext context, {
-  required String title,
-  required String label,
-  String? hint,
-}) async {
-  final controller = TextEditingController();
-  final result = await showDialog<String>(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: Text(title),
-      content: TextField(
-        controller: controller,
-        autofocus: true,
-        decoration: InputDecoration(labelText: label, hintText: hint),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(dialogContext, controller.text.trim()),
-          child: const Text('保存'),
-        ),
-      ],
-    ),
-  );
-  controller.dispose();
-  return result == null || result.isEmpty ? null : result;
-}
-
-Future<void> _openAffiliateLink(BuildContext context, String source) async {
+Future<void> _openExternalLink(BuildContext context, String source) async {
   try {
     final opened = await launchUrl(
       Uri.parse(source),
       mode: LaunchMode.externalApplication,
     );
-    if (!opened && context.mounted) _message(context, '无法打开购买链接，请检查系统浏览器');
+    if (!opened && context.mounted) _message(context, '无法打开链接，请检查系统浏览器');
   } catch (_) {
-    if (context.mounted) _message(context, '无法打开购买链接，请检查系统浏览器');
+    if (context.mounted) _message(context, '无法打开链接，请检查系统浏览器');
   }
 }
 

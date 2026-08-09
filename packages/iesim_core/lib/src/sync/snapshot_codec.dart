@@ -9,7 +9,6 @@ import '../model/plan.dart';
 import '../model/profile_lifecycle.dart';
 import '../model/subscription.dart';
 import '../model/subscription_details.dart';
-import '../interop/lpa_activation.dart';
 import '../result.dart';
 import '../value/money.dart';
 import '../value/phone_number.dart';
@@ -113,14 +112,6 @@ class SyncSnapshotCodec {
       'archivedAt': item.lifecycle.archivedAt?.toIso8601String(),
       'archiveReason': item.lifecycle.archiveReason?.name,
     },
-    'activation': item.activation == null
-        ? null
-        : {
-            'smdpAddress': item.activation!.smdpAddress,
-            'matchingId': item.activation!.matchingId,
-            'extra': item.activation!.extra,
-            'confirmationCode': item.activation!.confirmationCode,
-          },
     'plan': {
       'name': item.plan.name,
       'cyclePrice': _encodeMoney(item.plan.cyclePrice),
@@ -187,9 +178,6 @@ class SyncSnapshotCodec {
     final appearance = _requiredMap(value, 'appearance');
     final details = _requiredMap(value, 'details');
     final lifecycle = _requiredMap(value, 'lifecycle');
-    final activation = value['activation'] is Map
-        ? Map<String, dynamic>.from(value['activation'] as Map)
-        : null;
     return Subscription(
       id: _requiredString(value, 'id'),
       iccid: _optionalString(value, 'iccid'),
@@ -213,14 +201,7 @@ class SyncSnapshotCodec {
           null => null,
         },
       ),
-      activation: activation == null
-          ? null
-          : LpaActivation(
-              smdpAddress: _requiredString(activation, 'smdpAddress'),
-              matchingId: _requiredString(activation, 'matchingId'),
-              extra: _optionalString(activation, 'extra'),
-              confirmationCode: _optionalString(activation, 'confirmationCode'),
-            ),
+      activation: null,
       plan: Plan(
         name: _optionalString(plan, 'name'),
         cyclePrice: _decodeMoney(plan['cyclePrice']),
@@ -405,7 +386,7 @@ class SyncSnapshotCodec {
         name: common.name,
         note: common.note,
         presetId: common.presetId,
-        physicalIccid: _requiredString(value, 'physicalIccid'),
+        physicalIccid: _optionalString(value, 'physicalIccid'),
         createdAt: common.createdAt,
         updatedAt: common.updatedAt,
       ),
@@ -454,6 +435,7 @@ class SyncSnapshotCodec {
     'iccid': item.iccid,
     'operatorName': item.operatorName,
     'nickname': item.nickname,
+    'nekokoTagsRaw': item.nekokoTagsRaw,
     'subscriptionId': item.subscriptionId,
     'isPinned': item.isPinned,
     'createdAt': item.createdAt.toIso8601String(),
@@ -466,6 +448,7 @@ class SyncSnapshotCodec {
     iccid: _optionalString(value, 'iccid'),
     operatorName: _optionalString(value, 'operatorName'),
     nickname: _optionalString(value, 'nickname'),
+    nekokoTagsRaw: _optionalString(value, 'nekokoTagsRaw'),
     subscriptionId: _optionalString(value, 'subscriptionId'),
     isPinned: _requiredBool(value, 'isPinned'),
     createdAt: _requiredUtc(value, 'createdAt'),

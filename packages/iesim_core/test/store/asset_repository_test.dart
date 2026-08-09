@@ -45,7 +45,7 @@ void main() {
       RemovableEuiccCard(
         id: 'c1',
         name: '实体 eSIM',
-        presetId: '9esim-removable',
+        presetId: '9esim-v3',
         createdAt: created,
         updatedAt: created,
       ),
@@ -74,6 +74,8 @@ INSERT INTO subscriptions (
         eidId: 'e1',
         subscriptionId: 'sub-imported',
         operatorName: 'Example',
+        nickname: '主 Profile',
+        nekokoTagsRaw: 't:测试',
         isPinned: true,
         createdAt: created,
         updatedAt: created,
@@ -84,10 +86,73 @@ INSERT INTO subscriptions (
     expect(inventory.devices, hasLength(1));
     expect(inventory.slots, hasLength(1));
     expect(inventory.cards.single, isA<RemovableEuiccCard>());
-    expect(inventory.cards.single.presetId, '9esim-removable');
+    expect(inventory.cards.single.presetId, '9esim-v3');
     expect(inventory.eids.single.value, hasLength(32));
     expect(inventory.profiles.single.subscriptionId, 'sub-imported');
+    expect(inventory.profiles.single.nickname, '主 Profile');
+    expect(inventory.profiles.single.nekokoTagsRaw, 't:测试');
     expect(inventory.profiles.single.isPinned, isTrue);
+  });
+
+  test('普通实体 SIM 不要求卡片 ICCID，也不能添加 EID', () {
+    final card = PhysicalSimCard(
+      id: 'physical-without-iccid',
+      name: '无外部标识实体卡',
+      createdAt: created,
+      updatedAt: created,
+    );
+    expect(repository.upsertCard(card), isA<Ok<void>>());
+    final loaded = (repository.load() as Ok<AssetInventory>).value;
+    expect(loaded.cards.single.physicalIccid, isNull);
+
+    expect(
+      repository.upsertEid(
+        Euicc(
+          id: 'invalid-eid',
+          cardId: card.id,
+          value: '89000000000000000000000000000009',
+          createdAt: created,
+          updatedAt: created,
+        ),
+      ),
+      isA<Err<void>>(),
+    );
+  });
+
+  test('含 EID 的 eUICC 卡片不能改成普通实体 SIM', () {
+    repository.upsertCard(
+      RemovableEuiccCard(
+        id: 'convert-card',
+        name: '可拆卸 eUICC',
+        createdAt: created,
+        updatedAt: created,
+      ),
+    );
+    repository.upsertEid(
+      Euicc(
+        id: 'convert-eid',
+        cardId: 'convert-card',
+        value: '89000000000000000000000000000008',
+        createdAt: created,
+        updatedAt: created,
+      ),
+    );
+
+    expect(
+      repository.upsertCard(
+        PhysicalSimCard(
+          id: 'convert-card',
+          name: '错误转换',
+          createdAt: created,
+          updatedAt: created,
+        ),
+      ),
+      isA<Err<void>>(),
+    );
+    expect(
+      (repository.load() as Ok<AssetInventory>).value.cards.single,
+      isA<RemovableEuiccCard>(),
+    );
   });
 
   test('移动卡片和移至库存会记录独立资产事件', () {

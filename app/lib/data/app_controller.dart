@@ -1,10 +1,15 @@
+import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
 import 'package:iesim_core/iesim_core.dart';
 import 'package:uuid/uuid.dart';
 
+import 'euicc_card_presets.dart';
 import '../services/reminder_notifications.dart';
+import '../services/credential_vault.dart';
+import '../services/euicc_card_preset_service.dart';
+import '../services/home_action_center.dart';
 import '../services/webdav_service.dart';
 
 /// 应用层状态：只编排仓库与页面，不复制 core 中的日期和保号规则。
@@ -20,8 +25,12 @@ class AppController extends ChangeNotifier {
     required this._remindersEnabled,
     required this._persistMuseumAutoArchiveDays,
     required this._museumAutoArchiveDays,
+    required this._persistShowNekokoTags,
+    required this._showNekokoTags,
     required this._deletionService,
     required this._subscriptionReminderService,
+    required this._credentialVault,
+    required this._euiccCardPresetService,
     required this._webDav,
     required this._closeStore,
   }) : _subscriptionRepository = subscriptions,
@@ -36,10 +45,19 @@ class AppController extends ChangeNotifier {
     Future<void> Function(bool value)? persistRemindersEnabled,
     int? museumAutoArchiveDays = 90,
     Future<void> Function(int? value)? persistMuseumAutoArchiveDays,
+    bool showNekokoTags = false,
+    Future<void> Function(bool value)? persistShowNekokoTags,
     WebDavGateway? webDavGateway,
+    ActivationCredentialVault? credentialVault,
+    EuiccCardPresetService? euiccCardPresetService,
     bool enableWebDav = false,
   }) {
     final database = openIesimStore(databasePath);
+    final vault =
+        credentialVault ??
+        (databasePath == ':memory:'
+            ? MemoryActivationCredentialVault()
+            : const SecureActivationCredentialVault());
     return AppController._(
       subscriptions: SubscriptionRepository(database),
       activities: ActivityRecordRepository(database),
@@ -52,12 +70,16 @@ class AppController extends ChangeNotifier {
       museumAutoArchiveDays: museumAutoArchiveDays,
       persistMuseumAutoArchiveDays:
           persistMuseumAutoArchiveDays ?? (_) async {},
+      showNekokoTags: showNekokoTags,
+      persistShowNekokoTags: persistShowNekokoTags ?? (_) async {},
       deletionService: SubscriptionDeletionService(database),
       subscriptionReminderService: SubscriptionReminderService(database),
+      credentialVault: vault,
+      euiccCardPresetService: euiccCardPresetService,
       webDav:
           webDavGateway ??
           (enableWebDav
-              ? AppWebDavService(SyncStore(database))
+              ? AppWebDavService(SyncStore(database), vault)
               : const NoopWebDavGateway()),
       closeStore: database.close,
     );
@@ -71,7 +93,11 @@ class AppController extends ChangeNotifier {
     Future<void> Function(bool value)? persistRemindersEnabled,
     int? museumAutoArchiveDays = 90,
     Future<void> Function(int? value)? persistMuseumAutoArchiveDays,
+    bool showNekokoTags = false,
+    Future<void> Function(bool value)? persistShowNekokoTags,
     WebDavGateway? webDavGateway,
+    ActivationCredentialVault? credentialVault,
+    EuiccCardPresetService? euiccCardPresetService,
   }) => AppController.open(
     ':memory:',
     reminderNotifications: reminderNotifications,
@@ -79,7 +105,11 @@ class AppController extends ChangeNotifier {
     persistRemindersEnabled: persistRemindersEnabled,
     museumAutoArchiveDays: museumAutoArchiveDays,
     persistMuseumAutoArchiveDays: persistMuseumAutoArchiveDays,
+    showNekokoTags: showNekokoTags,
+    persistShowNekokoTags: persistShowNekokoTags,
     webDavGateway: webDavGateway,
+    credentialVault: credentialVault,
+    euiccCardPresetService: euiccCardPresetService,
   );
 
   final SubscriptionRepository _subscriptionRepository;
@@ -90,30 +120,58 @@ class AppController extends ChangeNotifier {
   final ReminderNotificationGateway _reminderNotifications;
   final Future<void> Function(bool value) _persistRemindersEnabled;
   final Future<void> Function(int? value) _persistMuseumAutoArchiveDays;
+  final Future<void> Function(bool value) _persistShowNekokoTags;
   final SubscriptionDeletionService _deletionService;
   final SubscriptionReminderService _subscriptionReminderService;
+  final ActivationCredentialVault _credentialVault;
+  final EuiccCardPresetService? _euiccCardPresetService;
   final WebDavGateway _webDav;
   final VoidCallback _closeStore;
   final Uuid _uuid = const Uuid();
   final KeepAliveEvaluator _evaluator = const KeepAliveEvaluator(
     clock: SystemClock(),
   );
+  final KeepAliveRuleEngine _keepAliveRuleEngine = const KeepAliveRuleEngine(
+    clock: SystemClock(),
+  );
+  final HomeActionCenter _homeActionCenter = const HomeActionCenter(
+    clock: SystemClock(),
+  );
 
   List<Subscription> _subscriptions = const [];
   List<ActivityRecord> _activities = const [];
   AssetInventory _assets = AssetInventory();
+  UnmodifiableListView<Subscription> _subscriptionsView = UnmodifiableListView(
+    const <Subscription>[],
+  );
+  UnmodifiableListView<ActivityRecord> _activitiesView = UnmodifiableListView(
+    const <ActivityRecord>[],
+  );
+  Map<String, Subscription> _subscriptionsById = const {};
+  Map<String, List<ActivityRecord>> _activitiesBySubscriptionId = const {};
+  Map<String, EsimProfile> _assetProfilesBySubscriptionId = const {};
+  Map<String, EsimProfile> _unlinkedAssetProfilesByIccid = const {};
+  List<HomeActionItem> _homeActions = const [];
+  int _scheduledReminderCount = 0;
+  int _timeSensitiveDerivedBucket = -1;
   bool _ready = false;
   bool _busy = false;
   String? _errorMessage;
   String _defaultTimeZoneId = 'UTC';
   bool _remindersEnabled;
   int? _museumAutoArchiveDays;
+  bool _showNekokoTags;
   bool _notificationPermissionGranted = false;
   String? _notificationError;
   WebDavConfiguration? _webDavConfiguration;
   SyncRunReport? _lastSyncReport;
   List<SyncConflictLog> _syncConflicts = const [];
   SyncState _syncState = const SyncState();
+  EuiccCardPresetLoadResult _euiccCardPresetResult = EuiccCardPresetLoadResult(
+    catalog: builtInEuiccCardPresetCatalog,
+    source: EuiccCardPresetSource.builtIn,
+    loadedAt: builtInEuiccCardPresetCatalog.updatedAt,
+  );
 
   bool get ready => _ready;
   bool get busy => _busy;
@@ -121,6 +179,7 @@ class AppController extends ChangeNotifier {
   String get defaultTimeZoneId => _defaultTimeZoneId;
   bool get remindersEnabled => _remindersEnabled;
   int? get museumAutoArchiveDays => _museumAutoArchiveDays;
+  bool get showNekokoTags => _showNekokoTags;
   bool get notificationPermissionGranted => _notificationPermissionGranted;
   String? get notificationError => _notificationError;
   Stream<String> get notificationSelections =>
@@ -130,19 +189,19 @@ class AppController extends ChangeNotifier {
   UnmodifiableListView<SyncConflictLog> get syncConflicts =>
       UnmodifiableListView(_syncConflicts);
   SyncState get syncState => _syncState;
+  EuiccCardPresetLoadResult get euiccCardPresetResult => _euiccCardPresetResult;
   int get scheduledReminderCount {
-    final planner = ReminderPlanner(clock: const SystemClock());
-    return _subscriptions.fold(
-      0,
-      (count, subscription) => count + planner.planFor(subscription).length,
-    );
+    _refreshTimeSensitiveDerivedStateIfNeeded();
+    return _scheduledReminderCount;
   }
 
-  UnmodifiableListView<Subscription> get subscriptions =>
-      UnmodifiableListView(_subscriptions);
-  UnmodifiableListView<ActivityRecord> get activities =>
-      UnmodifiableListView(_activities);
+  UnmodifiableListView<Subscription> get subscriptions => _subscriptionsView;
+  UnmodifiableListView<ActivityRecord> get activities => _activitiesView;
   AssetInventory get assets => _assets;
+  List<HomeActionItem> get homeActions {
+    _refreshTimeSensitiveDerivedStateIfNeeded();
+    return _homeActions;
+  }
 
   Future<void> initialize({required String defaultTimeZoneId}) async {
     _defaultTimeZoneId = defaultTimeZoneId;
@@ -159,6 +218,15 @@ class AppController extends ChangeNotifier {
     } catch (error) {
       _errorMessage = 'WebDAV 凭据读取失败：$error';
     }
+    final euiccService = _euiccCardPresetService;
+    if (euiccService != null) {
+      try {
+        _euiccCardPresetResult = await euiccService.loadCachedOrBuiltIn();
+      } catch (error) {
+        _errorMessage = 'eUICC 型号缓存读取失败：$error';
+      }
+      unawaited(refreshEuiccCardPresets());
+    }
     _loadSyncConflicts();
     _loadSyncState();
     await reload();
@@ -172,31 +240,23 @@ class AppController extends ChangeNotifier {
   KeepAliveStatus statusOf(Subscription subscription) =>
       _evaluator.evaluate(subscription.keepAlive, subscription.timeZoneId);
 
-  List<ActivityRecord> activitiesFor(String subscriptionId) =>
-      _activities
-          .where((record) => record.subscriptionId == subscriptionId)
-          .toList(growable: false)
-        ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+  KeepAliveEvaluation keepAliveEvaluationOf(Subscription subscription) =>
+      _keepAliveRuleEngine.evaluate(
+        subscription,
+        activities: activitiesFor(subscription.id),
+      );
 
-  Subscription? subscriptionById(String id) {
-    for (final subscription in _subscriptions) {
-      if (subscription.id == id) return subscription;
-    }
-    return null;
-  }
+  List<ActivityRecord> activitiesFor(String subscriptionId) =>
+      _activitiesBySubscriptionId[subscriptionId] ?? const [];
+
+  Subscription? subscriptionById(String id) => _subscriptionsById[id];
 
   EsimProfile? assetProfileForSubscription(Subscription subscription) {
-    for (final profile in _assets.profiles) {
-      if (profile.subscriptionId == subscription.id) return profile;
-    }
+    final linked = _assetProfilesBySubscriptionId[subscription.id];
+    if (linked != null) return linked;
     final iccid = subscription.iccid;
     if (iccid == null) return null;
-    for (final profile in _assets.profiles) {
-      if (profile.subscriptionId == null && profile.iccid == iccid) {
-        return profile;
-      }
-    }
-    return null;
+    return _unlinkedAssetProfilesByIccid[iccid];
   }
 
   Future<void> reload() async {
@@ -217,9 +277,15 @@ class AppController extends ChangeNotifier {
         Ok(value: final activities),
         Ok(value: final assets),
       ):
-        _subscriptions = subscriptions;
+        try {
+          _subscriptions = await _hydrateCredentials(subscriptions);
+        } catch (error) {
+          _subscriptions = subscriptions;
+          _errorMessage = '本机凭据保险库读取失败：$error';
+        }
         _activities = activities.reversed.toList(growable: false);
         _assets = assets;
+        _rebuildDerivedState();
       case (Err(failure: final failure), _, _):
         _errorMessage = _failureMessage(failure);
       case (_, Err(failure: final failure), _):
@@ -231,8 +297,62 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _rebuildDerivedState() {
+    _subscriptionsView = UnmodifiableListView(_subscriptions);
+    _activitiesView = UnmodifiableListView(_activities);
+    _subscriptionsById = Map.unmodifiable({
+      for (final subscription in _subscriptions) subscription.id: subscription,
+    });
+    final activityGroups = <String, List<ActivityRecord>>{};
+    for (final activity in _activities) {
+      activityGroups
+          .putIfAbsent(activity.subscriptionId, () => <ActivityRecord>[])
+          .add(activity);
+    }
+    _activitiesBySubscriptionId = Map.unmodifiable({
+      for (final entry in activityGroups.entries)
+        entry.key: List<ActivityRecord>.unmodifiable(entry.value),
+    });
+    final linkedProfiles = <String, EsimProfile>{};
+    final unlinkedProfiles = <String, EsimProfile>{};
+    for (final profile in _assets.profiles) {
+      final subscriptionId = profile.subscriptionId;
+      if (subscriptionId != null) {
+        linkedProfiles.putIfAbsent(subscriptionId, () => profile);
+      } else if (profile.iccid case final iccid?) {
+        unlinkedProfiles.putIfAbsent(iccid, () => profile);
+      }
+    }
+    _assetProfilesBySubscriptionId = Map.unmodifiable(linkedProfiles);
+    _unlinkedAssetProfilesByIccid = Map.unmodifiable(unlinkedProfiles);
+    _rebuildTimeSensitiveDerivedState(_currentTimeBucket());
+  }
+
+  void _refreshTimeSensitiveDerivedStateIfNeeded() {
+    final bucket = _currentTimeBucket();
+    if (bucket == _timeSensitiveDerivedBucket) return;
+    _rebuildTimeSensitiveDerivedState(bucket);
+  }
+
+  void _rebuildTimeSensitiveDerivedState(int bucket) {
+    _homeActions = _homeActionCenter.build(
+      subscriptions: _subscriptions,
+      activities: _activities,
+    );
+    final planner = ReminderPlanner(clock: const SystemClock());
+    _scheduledReminderCount = _subscriptions.fold(
+      0,
+      (count, subscription) => count + planner.planFor(subscription).length,
+    );
+    _timeSensitiveDerivedBucket = bucket;
+  }
+
+  static int _currentTimeBucket() =>
+      DateTime.now().toUtc().millisecondsSinceEpoch ~/ 300000;
+
   Future<String?> saveSubscription(Subscription subscription) async {
-    return _mutate(
+    return _mutateSubscription(
+      subscription,
       () => _subscriptionReminderService.upsert(
         subscription: subscription,
         clock: FixedClock(subscription.updatedAt),
@@ -246,9 +366,13 @@ class AppController extends ChangeNotifier {
     required Subscription subscription,
     required String eidId,
   }) {
-    final eidExists = _assets.eids.any((eid) => eid.id == eidId);
-    if (!eidExists) return Future.value('选定的 EID 已不存在，请重新选择');
     final existing = assetProfileForSubscription(subscription);
+    final placementError = _profilePlacementError(
+      eidId,
+      iccid: subscription.iccid,
+      excludedProfileId: existing?.id,
+    );
+    if (placementError != null) return Future.value(placementError);
     final assetProfile = EsimProfile(
       id: existing?.id ?? _uuid.v4(),
       eidId: eidId,
@@ -260,7 +384,8 @@ class AppController extends ChangeNotifier {
       createdAt: existing?.createdAt ?? subscription.updatedAt,
       updatedAt: subscription.updatedAt,
     );
-    return _mutate(
+    return _mutateSubscription(
+      subscription,
       () => _subscriptionReminderService.upsert(
         subscription: subscription,
         clock: FixedClock(subscription.updatedAt),
@@ -282,13 +407,24 @@ class AppController extends ChangeNotifier {
   }
 
   Future<String?> deleteSubscriptionPermanently(String id) async {
-    return _mutate(
-      () => _deletionService.delete(
-        subscriptionId: id,
-        nowUtc: DateTime.now().toUtc(),
-      ),
+    final now = DateTime.now().toUtc();
+    final error = await _mutate(
+      () => _deletionService.delete(subscriptionId: id, nowUtc: now),
       refreshReminders: true,
     );
+    if (error != null) return error;
+    try {
+      await _credentialVault.write(
+        ActivationCredentialRecord(
+          subscriptionId: id,
+          updatedAtUtc: now,
+          activation: null,
+        ),
+      );
+      return null;
+    } catch (error) {
+      return 'Profile 已删除，但凭据墓碑保存失败：$error';
+    }
   }
 
   Future<String?> activateProfile(String id) async {
@@ -332,6 +468,17 @@ class AppController extends ChangeNotifier {
     await reload();
     await _refreshNotifications();
     return _errorMessage;
+  }
+
+  Future<String?> setShowNekokoTags(bool value) async {
+    try {
+      await _persistShowNekokoTags(value);
+    } catch (error) {
+      return 'Nekoko Tag 展示设置保存失败：$error';
+    }
+    _showNekokoTags = value;
+    notifyListeners();
+    return null;
   }
 
   Future<String?> saveDevice(DeviceAsset device) =>
@@ -384,6 +531,36 @@ class AppController extends ChangeNotifier {
           isPinned: isPinned,
           updatedAt: now,
         ),
+      ),
+    );
+  }
+
+  Future<String?> setKeepAliveConstraintCompleted({
+    required String subscriptionId,
+    required String constraintId,
+    required bool completed,
+    String? note,
+  }) {
+    final subscription = subscriptionById(subscriptionId);
+    if (subscription == null) return Future.value('Profile 不存在');
+    final constraints = [...subscription.keepAlive.policy.constraints];
+    final index = constraints.indexWhere((item) => item.id == constraintId);
+    if (index < 0) return Future.value('保号条件不存在');
+    final now = DateTime.now().toUtc();
+    constraints[index] = constraints[index].copyWith(
+      completedAt: completed ? now : null,
+      completionNote: completed && note != null && note.trim().isNotEmpty
+          ? note.trim()
+          : null,
+    );
+    return saveSubscription(
+      subscription.copyWith(
+        keepAlive: subscription.keepAlive.copyWith(
+          policy: subscription.keepAlive.policy.copyWith(
+            constraints: constraints,
+          ),
+        ),
+        updatedAt: now,
       ),
     );
   }
@@ -452,15 +629,25 @@ class AppController extends ChangeNotifier {
     required String profileId,
     required String toEidId,
     String? note,
-  }) => _mutate(
-    () => _assetRepository.moveProfile(
-      profileId: profileId,
-      toEidId: toEidId,
-      eventId: _uuid.v4(),
-      occurredAt: DateTime.now().toUtc(),
-      note: note,
-    ),
-  );
+  }) {
+    final profile = _assets.profiles.where((item) => item.id == profileId);
+    if (profile.isEmpty) return Future.value('Profile 不存在');
+    final placementError = _profilePlacementError(
+      toEidId,
+      iccid: profile.single.iccid,
+      excludedProfileId: profileId,
+    );
+    if (placementError != null) return Future.value(placementError);
+    return _mutate(
+      () => _assetRepository.moveProfile(
+        profileId: profileId,
+        toEidId: toEidId,
+        eventId: _uuid.v4(),
+        occurredAt: DateTime.now().toUtc(),
+        note: note,
+      ),
+    );
+  }
 
   Future<String?> wipeProfile(String profileId, {String? note}) => _mutate(
     () => _assetRepository.wipeProfile(
@@ -499,6 +686,12 @@ class AppController extends ChangeNotifier {
     if (result case Err(failure: final failure)) {
       return _finishFailure(failure);
     }
+    try {
+      await _saveImportedCredentials(report.subscriptions);
+    } catch (error) {
+      _setBusy(false);
+      return '数据已导入，但激活凭据写入保险库失败：$error';
+    }
     await reload();
     await _refreshNotifications();
     _setBusy(false);
@@ -530,6 +723,12 @@ class AppController extends ChangeNotifier {
     if (result case Err(failure: final failure)) {
       return _finishFailure(failure);
     }
+    try {
+      await _saveImportedCredentials(report.subscriptions);
+    } catch (error) {
+      _setBusy(false);
+      return '测试数据已写入，但激活凭据写入保险库失败：$error';
+    }
     await reload();
     await _refreshNotifications();
     _setBusy(false);
@@ -559,6 +758,7 @@ class AppController extends ChangeNotifier {
     }
     try {
       if (clearProfiles) await _reminderNotifications.cancelAll();
+      if (clearProfiles) await _credentialVault.clear();
       if (clearWebDavConfiguration) await _webDav.clearConfiguration();
     } catch (error) {
       await reload();
@@ -697,6 +897,107 @@ class AppController extends ChangeNotifier {
     return null;
   }
 
+  Future<String?> _mutateSubscription(
+    Subscription subscription,
+    Result<void> Function() operation, {
+    bool refreshReminders = false,
+  }) async {
+    if (_busy) return '当前操作尚未完成，请稍候';
+    _setBusy(true);
+    ActivationCredentialRecord? previous;
+    try {
+      previous = await _credentialVault.read(subscription.id);
+      await _credentialVault.write(
+        ActivationCredentialRecord(
+          subscriptionId: subscription.id,
+          updatedAtUtc: subscription.updatedAt,
+          activation: subscription.activation,
+        ),
+      );
+    } catch (error) {
+      _setBusy(false);
+      return '激活凭据保险库写入失败：$error';
+    }
+    final result = operation();
+    if (result case Err(failure: final failure)) {
+      try {
+        if (previous == null) {
+          await _credentialVault.purge(subscription.id);
+        } else {
+          await _credentialVault.write(previous);
+        }
+      } catch (_) {}
+      return _finishFailure(failure);
+    }
+    await reload();
+    if (refreshReminders) await _refreshNotifications();
+    _setBusy(false);
+    return null;
+  }
+
+  Future<List<Subscription>> _hydrateCredentials(
+    List<Subscription> subscriptions,
+  ) async {
+    final records = {
+      for (final record in await _credentialVault.readAll())
+        record.subscriptionId: record,
+    };
+    return [
+      for (final subscription in subscriptions)
+        subscription.copyWith(activation: records[subscription.id]?.activation),
+    ];
+  }
+
+  Future<void> _saveImportedCredentials(
+    Iterable<Subscription> subscriptions,
+  ) async {
+    for (final subscription in subscriptions) {
+      if (subscription.activation == null) continue;
+      await _credentialVault.write(
+        ActivationCredentialRecord(
+          subscriptionId: subscription.id,
+          updatedAtUtc: subscription.updatedAt,
+          activation: subscription.activation,
+        ),
+      );
+    }
+  }
+
+  String? _profilePlacementError(
+    String eidId, {
+    String? iccid,
+    String? excludedProfileId,
+  }) {
+    final eids = _assets.eids.where((item) => item.id == eidId);
+    if (eids.isEmpty) return '选定的 EID 已不存在，请重新选择';
+    final eid = eids.single;
+    final card = _assets.cardById(eid.cardId);
+    if (card == null) return '目标 EID 没有可用的所属卡片';
+    if (card is PhysicalSimCard) return '普通实体 SIM 不能承载 eSIM Profile';
+    final slot = _assets.slotHolding(card.id);
+    if (card is EmbeddedEuiccCard && slot == null) {
+      return '内置 eUICC 必须位于所属设备卡槽';
+    }
+    if (slot != null) {
+      final error = AssetRules.placementError(card, slot);
+      if (error != null) return error;
+    }
+    if (iccid != null && iccid.trim().isNotEmpty) {
+      final cardEids = _assets
+          .eidsForCard(card.id)
+          .map((item) => item.id)
+          .toSet();
+      final duplicate = _assets.profiles.any(
+        (profile) =>
+            profile.id != excludedProfileId &&
+            cardEids.contains(profile.eidId) &&
+            profile.iccid == iccid,
+      );
+      if (duplicate) return '该卡片上已有相同 ICCID 的 Profile';
+    }
+    return null;
+  }
+
   Future<bool> setRemindersEnabled(bool value) async {
     _notificationError = null;
     try {
@@ -822,6 +1123,18 @@ class AppController extends ChangeNotifier {
       return null;
     } catch (error) {
       return '移除配置失败：$error';
+    }
+  }
+
+  Future<String?> refreshEuiccCardPresets() async {
+    final service = _euiccCardPresetService;
+    if (service == null) return null;
+    try {
+      _euiccCardPresetResult = await service.load();
+      notifyListeners();
+      return _euiccCardPresetResult.warning;
+    } catch (error) {
+      return 'eUICC 型号库更新失败：$error';
     }
   }
 

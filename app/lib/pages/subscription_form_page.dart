@@ -3,6 +3,8 @@ import 'package:iesim_core/iesim_core.dart';
 import 'package:uuid/uuid.dart';
 
 import '../app/app_scope.dart';
+import '../data/euicc_card_presets.dart';
+import '../services/compatibility_assistant.dart';
 import '../services/carrier_network_catalog_service.dart';
 import '../services/carrier_preset_service.dart';
 import '../services/country_calling_codes.dart';
@@ -263,6 +265,9 @@ class _SubscriptionFormPageState extends State<SubscriptionFormPage> {
             const SizedBox(height: 16),
             _ProfilePlacementSection(
               inventory: controller.assets,
+              subscriptions: controller.subscriptions,
+              presets: controller.euiccCardPresetResult.catalog.cards,
+              subscription: widget.subscription,
               selectedCardId: _selectedCardId,
               selectedEidId: _selectedEidId,
               allowUnassigned: _allowUnassignedPlacement,
@@ -469,6 +474,7 @@ class _SubscriptionFormPageState extends State<SubscriptionFormPage> {
                     children: [
                       Expanded(
                         child: TextFormField(
+                          key: const ValueKey('profile-operator-field'),
                           controller: _operator,
                           focusNode: _operatorFocus,
                           textInputAction: TextInputAction.next,
@@ -1192,7 +1198,15 @@ class _SubscriptionFormPageState extends State<SubscriptionFormPage> {
     final details = TextEditingController(text: existing?.details);
     final days = TextEditingController(text: existing?.withinDays?.toString());
     final regions = TextEditingController(text: existing?.regions.join('，'));
+    final completionNote = TextEditingController(
+      text: existing?.completionNote,
+    );
     var kind = existing?.kind ?? KeepAliveConstraintKind.custom;
+    var evaluationMode =
+        existing?.evaluationMode ?? _defaultConstraintMode(kind);
+    var qualifyingActions = {...?existing?.qualifyingActions};
+    var anchorAt = existing?.anchorAt;
+    var completed = existing?.completedAt != null;
     String? errorText;
     final result = await showDialog<KeepAliveConstraint>(
       context: context,
@@ -1217,7 +1231,30 @@ class _SubscriptionFormPageState extends State<SubscriptionFormPage> {
                     ],
                     onChanged: (value) {
                       if (value != null) {
-                        setDialogState(() => kind = value);
+                        setDialogState(() {
+                          kind = value;
+                          if (existing == null) {
+                            evaluationMode = _defaultConstraintMode(value);
+                          }
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<KeepAliveConstraintEvaluationMode>(
+                    initialValue: evaluationMode,
+                    decoration: const InputDecoration(labelText: '完成判定'),
+                    items: [
+                      for (final item
+                          in KeepAliveConstraintEvaluationMode.values)
+                        DropdownMenuItem(
+                          value: item,
+                          child: Text(_constraintModeName(item)),
+                        ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setDialogState(() => evaluationMode = value);
                       }
                     },
                   ),
@@ -1238,6 +1275,92 @@ class _SubscriptionFormPageState extends State<SubscriptionFormPage> {
                       hintText: '10',
                     ),
                   ),
+                  if (kind == KeepAliveConstraintKind.custom ||
+                      kind == KeepAliveConstraintKind.paidRetention) ...[
+                    const SizedBox(height: 12),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.flag_outlined),
+                      title: const Text('起算日期'),
+                      subtitle: Text(
+                        anchorAt == null
+                            ? '未设置；有期限时将显示资料不足'
+                            : '${anchorAt!.year}-${anchorAt!.month.toString().padLeft(2, '0')}-${anchorAt!.day.toString().padLeft(2, '0')}',
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (anchorAt != null)
+                            IconButton(
+                              tooltip: '清除',
+                              onPressed: () =>
+                                  setDialogState(() => anchorAt = null),
+                              icon: const Icon(Icons.close_rounded),
+                            ),
+                          IconButton(
+                            tooltip: '选择日期',
+                            onPressed: () async {
+                              final now = DateTime.now();
+                              final picked = await showDatePicker(
+                                context: dialogContext,
+                                initialDate: anchorAt?.toLocal() ?? now,
+                                firstDate: DateTime(2000),
+                                lastDate: DateTime(now.year + 30),
+                              );
+                              if (picked == null) return;
+                              final calendar = ZonedCalendar(
+                                _timeZone.text.trim().isEmpty
+                                    ? 'UTC'
+                                    : _timeZone.text.trim(),
+                              );
+                              setDialogState(
+                                () => anchorAt = calendar.utcFromParts(
+                                  year: picked.year,
+                                  month: picked.month,
+                                  day: picked.day,
+                                  hour: 12,
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.calendar_month_outlined),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  if (evaluationMode ==
+                      KeepAliveConstraintEvaluationMode.activity) ...[
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '独立有效动作（不选则继承主规则）',
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(
+                        spacing: 7,
+                        runSpacing: 7,
+                        children: [
+                          for (final action in KeepAliveAction.values)
+                            FilterChip(
+                              label: Text(_keepAliveActionName(action)),
+                              selected: qualifyingActions.contains(action),
+                              onSelected: (selected) => setDialogState(() {
+                                if (selected) {
+                                  qualifyingActions.add(action);
+                                } else {
+                                  qualifyingActions.remove(action);
+                                }
+                              }),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   TextField(
                     controller: regions,
@@ -1256,6 +1379,21 @@ class _SubscriptionFormPageState extends State<SubscriptionFormPage> {
                       errorText: errorText,
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('已满足此条件'),
+                    subtitle: const Text('手动确认会覆盖自动判定；可随时撤销'),
+                    value: completed,
+                    onChanged: (value) =>
+                        setDialogState(() => completed = value),
+                  ),
+                  if (completed)
+                    TextField(
+                      controller: completionNote,
+                      maxLength: 500,
+                      decoration: const InputDecoration(labelText: '完成备注（可选）'),
+                    ),
                 ],
               ),
             ),
@@ -1280,11 +1418,21 @@ class _SubscriptionFormPageState extends State<SubscriptionFormPage> {
                 Navigator.pop(
                   dialogContext,
                   KeepAliveConstraint(
+                    id: existing?.id ?? const Uuid().v4(),
                     kind: kind,
                     title: title.text.trim(),
                     details: details.text.trim(),
                     withinDays: parsedDays,
                     regions: _parseTags(regions.text),
+                    evaluationMode: evaluationMode,
+                    qualifyingActions: qualifyingActions,
+                    anchorAt: anchorAt,
+                    completedAt: completed
+                        ? existing?.completedAt ?? DateTime.now().toUtc()
+                        : null,
+                    completionNote: completed
+                        ? _emptyToNull(completionNote.text)
+                        : null,
                   ),
                 );
               },
@@ -1298,6 +1446,7 @@ class _SubscriptionFormPageState extends State<SubscriptionFormPage> {
     details.dispose();
     days.dispose();
     regions.dispose();
+    completionNote.dispose();
     if (result == null || !mounted) return;
     setState(() {
       if (index == null) {
@@ -1549,6 +1698,17 @@ class _SubscriptionFormPageState extends State<SubscriptionFormPage> {
         updatedAt: now,
       );
       final controller = AppScope.of(context);
+      if (_selectedEidId != null) {
+        final assessment = EuiccCompatibilityAssistant(
+          inventory: controller.assets,
+          subscriptions: controller.subscriptions,
+          presets: controller.euiccCardPresetResult.catalog.cards,
+        ).assess(eidId: _selectedEidId!, subscription: subscription);
+        if (assessment.severity != CompatibilitySeverity.compatible) {
+          final proceed = await _reviewCompatibility(assessment);
+          if (!mounted || !proceed) return;
+        }
+      }
       final error = _selectedEidId == null
           ? await controller.saveSubscription(subscription)
           : await controller.saveSubscriptionAtEid(
@@ -1566,6 +1726,55 @@ class _SubscriptionFormPageState extends State<SubscriptionFormPage> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Future<bool> _reviewCompatibility(CompatibilityAssessment assessment) async {
+    final blocked = !assessment.canProceed;
+    final findings = assessment.findings
+        .where(
+          (finding) => finding.severity != CompatibilitySeverity.compatible,
+        )
+        .toList(growable: false);
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Text(blocked ? '无法放置到该 EID' : '保存前确认兼容性'),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final finding in findings)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        finding.severity == CompatibilitySeverity.blocked
+                            ? Icons.block_rounded
+                            : Icons.warning_amber_rounded,
+                        color: finding.severity == CompatibilitySeverity.blocked
+                            ? Theme.of(dialogContext).colorScheme.error
+                            : Theme.of(dialogContext).colorScheme.tertiary,
+                      ),
+                      title: Text(finding.title),
+                      subtitle: Text(finding.detail),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(blocked ? '知道了' : '返回检查'),
+              ),
+              if (!blocked)
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  child: const Text('仍然保存'),
+                ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   static String? _emptyToNull(String value) {
@@ -1969,6 +2178,9 @@ class _ApnPicker extends StatelessWidget {
 class _ProfilePlacementSection extends StatelessWidget {
   const _ProfilePlacementSection({
     required this.inventory,
+    required this.subscriptions,
+    required this.presets,
+    required this.subscription,
     required this.selectedCardId,
     required this.selectedEidId,
     required this.allowUnassigned,
@@ -1977,6 +2189,9 @@ class _ProfilePlacementSection extends StatelessWidget {
   });
 
   final AssetInventory inventory;
+  final Iterable<Subscription> subscriptions;
+  final Iterable<EuiccCardPreset> presets;
+  final Subscription? subscription;
   final String? selectedCardId;
   final String? selectedEidId;
   final bool allowUnassigned;
@@ -1996,6 +2211,13 @@ class _ProfilePlacementSection extends StatelessWidget {
         ? const <Euicc>[]
         : inventory.eidsForCard(selectedCardId!).toList(growable: false);
     final selectedEid = eids.where((eid) => eid.id == selectedEidId);
+    final assessment = selectedEidId == null
+        ? null
+        : EuiccCompatibilityAssistant(
+            inventory: inventory,
+            subscriptions: subscriptions,
+            presets: presets,
+          ).assess(eidId: selectedEidId!, subscription: subscription);
 
     return SectionCard(
       title: '卡片与 EID',
@@ -2070,6 +2292,10 @@ class _ProfilePlacementSection extends StatelessWidget {
               ),
             ),
           ],
+          if (assessment != null) ...[
+            const SizedBox(height: 10),
+            _CompatibilityPanel(assessment: assessment),
+          ],
           if (cards.isEmpty) ...[
             const SizedBox(height: 10),
             Text(
@@ -2109,6 +2335,74 @@ class _ProfilePlacementSection extends StatelessWidget {
         : '…${eid.value.substring(eid.value.length - 10)}';
     final label = eid.label?.trim();
     return label == null || label.isEmpty ? shortValue : '$label · $shortValue';
+  }
+}
+
+class _CompatibilityPanel extends StatelessWidget {
+  const _CompatibilityPanel({required this.assessment});
+
+  final CompatibilityAssessment assessment;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final (icon, foreground, background) = switch (assessment.severity) {
+      CompatibilitySeverity.compatible => (
+        Icons.verified_outlined,
+        scheme.primary,
+        scheme.primaryContainer.withValues(alpha: 0.5),
+      ),
+      CompatibilitySeverity.caution => (
+        Icons.warning_amber_rounded,
+        scheme.onTertiaryContainer,
+        scheme.tertiaryContainer.withValues(alpha: 0.65),
+      ),
+      CompatibilitySeverity.blocked => (
+        Icons.block_rounded,
+        scheme.error,
+        scheme.errorContainer.withValues(alpha: 0.55),
+      ),
+    };
+    final important = assessment.findings
+        .where((finding) => finding.severity == assessment.severity)
+        .take(2)
+        .toList(growable: false);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: foreground),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '兼容性：${assessment.shortLabel}',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: foreground,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                for (final finding in important)
+                  Text(
+                    finding.detail,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -2335,8 +2629,12 @@ class _ConstraintTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final scope = <String>[
+      _constraintModeName(constraint.evaluationMode),
       if (constraint.withinDays != null) '${constraint.withinDays} 天内',
       if (constraint.regions.isNotEmpty) constraint.regions.join(' / '),
+      if (constraint.qualifyingActions.isNotEmpty)
+        constraint.qualifyingActions.map(_keepAliveActionName).join('、'),
+      if (constraint.completedAt != null) '已确认完成',
     ].join(' · ');
     return Material(
       color: scheme.surfaceContainerHighest.withValues(alpha: .55),
@@ -2478,6 +2776,21 @@ String _constraintKindName(KeepAliveConstraintKind kind) => switch (kind) {
   KeepAliveConstraintKind.paidRetention => '付费保号',
   KeepAliveConstraintKind.custom => '自定义',
 };
+
+KeepAliveConstraintEvaluationMode _defaultConstraintMode(
+  KeepAliveConstraintKind kind,
+) => switch (kind) {
+  KeepAliveConstraintKind.firstUse || KeepAliveConstraintKind.afterPlanExpiry =>
+    KeepAliveConstraintEvaluationMode.activity,
+  KeepAliveConstraintKind.paidRetention ||
+  KeepAliveConstraintKind.custom => KeepAliveConstraintEvaluationMode.manual,
+};
+
+String _constraintModeName(KeepAliveConstraintEvaluationMode mode) =>
+    switch (mode) {
+      KeepAliveConstraintEvaluationMode.activity => '按活动记录自动判定',
+      KeepAliveConstraintEvaluationMode.manual => '手动确认',
+    };
 
 IconData _constraintKindIcon(KeepAliveConstraintKind kind) => switch (kind) {
   KeepAliveConstraintKind.firstUse => Icons.first_page_rounded,

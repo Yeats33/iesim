@@ -230,6 +230,11 @@ sealed class SimCard {
   final String id;
   final String name;
   final String? note;
+
+  /// 外部格式有时用订阅 ICCID 识别一张实体卡。
+  ///
+  /// ieSIM 自身不把它当作卡片层字段展示；eUICC 卡片由一个或多个 EID 识别，
+  /// Profile 的 ICCID 仍保存在 Profile / Subscription 层。
   final String? physicalIccid;
   final String? presetId;
   final DateTime createdAt;
@@ -271,7 +276,7 @@ final class PhysicalSimCard extends SimCard {
     required super.name,
     super.note,
     super.presetId,
-    required String super.physicalIccid,
+    super.physicalIccid,
     required super.createdAt,
     required super.updatedAt,
   });
@@ -356,12 +361,15 @@ class Euicc {
 }
 
 class EsimProfile {
+  static const _notProvided = Object();
+
   EsimProfile({
     required this.id,
     required this.eidId,
     this.iccid,
     this.operatorName,
     this.nickname,
+    this.nekokoTagsRaw,
     this.subscriptionId,
     this.isPinned = false,
     required this.createdAt,
@@ -380,7 +388,15 @@ class EsimProfile {
   final String eidId;
   final String? iccid;
   final String? operatorName;
+
+  /// ieSIM 自己的 Profile 显示名称，不承载第三方结构化标签。
   final String? nickname;
+
+  /// 从 Nekoko 导入或为 Nekoko 生成的原始结构化标签。
+  ///
+  /// 这是外部互操作元数据，默认不在普通 Profile 界面展示；只有用户主动
+  /// 提取时，识别出的内容才会写入 Subscription 的原生字段。
+  final String? nekokoTagsRaw;
   final String? subscriptionId;
   final bool isPinned;
   final DateTime createdAt;
@@ -390,7 +406,8 @@ class EsimProfile {
     String? eidId,
     String? iccid,
     String? operatorName,
-    String? nickname,
+    Object? nickname = _notProvided,
+    Object? nekokoTagsRaw = _notProvided,
     String? subscriptionId,
     bool clearSubscription = false,
     bool? isPinned,
@@ -400,7 +417,12 @@ class EsimProfile {
     eidId: eidId ?? this.eidId,
     iccid: iccid ?? this.iccid,
     operatorName: operatorName ?? this.operatorName,
-    nickname: nickname ?? this.nickname,
+    nickname: identical(nickname, _notProvided)
+        ? this.nickname
+        : nickname as String?,
+    nekokoTagsRaw: identical(nekokoTagsRaw, _notProvided)
+        ? this.nekokoTagsRaw
+        : nekokoTagsRaw as String?,
     subscriptionId: clearSubscription
         ? null
         : subscriptionId ?? this.subscriptionId,
@@ -417,6 +439,7 @@ class EsimProfile {
       other.iccid == iccid &&
       other.operatorName == operatorName &&
       other.nickname == nickname &&
+      other.nekokoTagsRaw == nekokoTagsRaw &&
       other.subscriptionId == subscriptionId &&
       other.isPinned == isPinned &&
       other.createdAt == createdAt &&
@@ -429,6 +452,7 @@ class EsimProfile {
     iccid,
     operatorName,
     nickname,
+    nekokoTagsRaw,
     subscriptionId,
     isPinned,
     createdAt,
@@ -575,12 +599,24 @@ class AssetInventory {
     Iterable<Euicc> eids = const [],
     Iterable<EsimProfile> profiles = const [],
     Iterable<AssetEvent> events = const [],
-  }) : devices = UnmodifiableListView(devices),
-       slots = UnmodifiableListView(slots),
-       cards = UnmodifiableListView(cards),
-       eids = UnmodifiableListView(eids),
-       profiles = UnmodifiableListView(profiles),
-       events = UnmodifiableListView(events);
+  }) : devices = UnmodifiableListView(List.of(devices, growable: false)),
+       slots = UnmodifiableListView(List.of(slots, growable: false)),
+       cards = UnmodifiableListView(List.of(cards, growable: false)),
+       eids = UnmodifiableListView(List.of(eids, growable: false)),
+       profiles = UnmodifiableListView(List.of(profiles, growable: false)),
+       events = UnmodifiableListView(List.of(events, growable: false)) {
+    _devicesById = _indexUnmodifiable(this.devices, (item) => item.id);
+    _slotsByCardId = _indexUnmodifiable(
+      this.slots.where((item) => item.cardId != null),
+      (item) => item.cardId!,
+    );
+    _cardsById = _indexUnmodifiable(this.cards, (item) => item.id);
+    _eidsById = _indexUnmodifiable(this.eids, (item) => item.id);
+    _profilesById = _indexUnmodifiable(this.profiles, (item) => item.id);
+    _slotsByDeviceId = _groupUnmodifiable(this.slots, (item) => item.deviceId);
+    _eidsByCardId = _groupUnmodifiable(this.eids, (item) => item.cardId);
+    _profilesByEidId = _groupUnmodifiable(this.profiles, (item) => item.eidId);
+  }
 
   final UnmodifiableListView<DeviceAsset> devices;
   final UnmodifiableListView<SimSlot> slots;
@@ -589,28 +625,58 @@ class AssetInventory {
   final UnmodifiableListView<EsimProfile> profiles;
   final UnmodifiableListView<AssetEvent> events;
 
+  late final Map<String, DeviceAsset> _devicesById;
+  late final Map<String, SimSlot> _slotsByCardId;
+  late final Map<String, SimCard> _cardsById;
+  late final Map<String, Euicc> _eidsById;
+  late final Map<String, EsimProfile> _profilesById;
+  late final Map<String, UnmodifiableListView<SimSlot>> _slotsByDeviceId;
+  late final Map<String, UnmodifiableListView<Euicc>> _eidsByCardId;
+  late final Map<String, UnmodifiableListView<EsimProfile>> _profilesByEidId;
+
   Iterable<SimSlot> slotsForDevice(String deviceId) =>
-      slots.where((slot) => slot.deviceId == deviceId);
+      _slotsByDeviceId[deviceId] ?? const [];
 
-  SimSlot? slotHolding(String cardId) {
-    for (final slot in slots) {
-      if (slot.cardId == cardId) return slot;
-    }
-    return null;
-  }
+  DeviceAsset? deviceById(String id) => _devicesById[id];
 
-  SimCard? cardById(String id) {
-    for (final card in cards) {
-      if (card.id == id) return card;
-    }
-    return null;
-  }
+  SimSlot? slotHolding(String cardId) => _slotsByCardId[cardId];
+
+  SimCard? cardById(String id) => _cardsById[id];
+
+  Euicc? eidById(String id) => _eidsById[id];
+
+  EsimProfile? profileById(String id) => _profilesById[id];
 
   Iterable<Euicc> eidsForCard(String cardId) =>
-      eids.where((eid) => eid.cardId == cardId);
+      _eidsByCardId[cardId] ?? const [];
 
   Iterable<EsimProfile> profilesForEid(String eidId) =>
-      profiles.where((profile) => profile.eidId == eidId);
+      _profilesByEidId[eidId] ?? const [];
+}
+
+Map<String, UnmodifiableListView<T>> _groupUnmodifiable<T>(
+  Iterable<T> values,
+  String Function(T value) keyOf,
+) {
+  final grouped = <String, List<T>>{};
+  for (final value in values) {
+    grouped.putIfAbsent(keyOf(value), () => <T>[]).add(value);
+  }
+  return Map.unmodifiable({
+    for (final entry in grouped.entries)
+      entry.key: UnmodifiableListView(entry.value),
+  });
+}
+
+Map<String, T> _indexUnmodifiable<T>(
+  Iterable<T> values,
+  String Function(T value) keyOf,
+) {
+  final indexed = <String, T>{};
+  for (final value in values) {
+    indexed.putIfAbsent(keyOf(value), () => value);
+  }
+  return Map.unmodifiable(indexed);
 }
 
 void _requireId(String value, String name) {

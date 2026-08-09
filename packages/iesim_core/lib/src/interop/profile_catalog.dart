@@ -19,6 +19,12 @@ class ProfileCatalogEntry {
   final int? referenceSizeBytes;
   final Map<String, int> eumSizes;
 
+  String? get mcc =>
+      RegExp(r'^\d{5,6}$').hasMatch(plmn) ? plmn.substring(0, 3) : null;
+
+  String? get mnc =>
+      RegExp(r'^\d{5,6}$').hasMatch(plmn) ? plmn.substring(3) : null;
+
   int? sizeForEum(String? eumId) => eumId == null
       ? referenceSizeBytes
       : eumSizes[eumId] ?? referenceSizeBytes;

@@ -43,6 +43,7 @@ class LocalReminderNotifications implements ReminderNotificationGateway {
       priority: Priority.high,
       category: AndroidNotificationCategory.reminder,
     ),
+    iOS: DarwinNotificationDetails(),
   );
 
   final FlutterLocalNotificationsPlugin _plugin;
@@ -53,6 +54,11 @@ class LocalReminderNotifications implements ReminderNotificationGateway {
     await _plugin.initialize(
       settings: const InitializationSettings(
         android: AndroidInitializationSettings('ic_stat_iesim'),
+        iOS: DarwinInitializationSettings(
+          requestAlertPermission: false,
+          requestSoundPermission: false,
+          requestBadgePermission: false,
+        ),
       ),
       onDidReceiveNotificationResponse: (response) {
         final payload = response.payload;
@@ -66,22 +72,48 @@ class LocalReminderNotifications implements ReminderNotificationGateway {
         AndroidFlutterLocalNotificationsPlugin
       >();
 
+  IOSFlutterLocalNotificationsPlugin? get _ios => _plugin
+      .resolvePlatformSpecificImplementation<
+        IOSFlutterLocalNotificationsPlugin
+      >();
+
   @override
   Future<bool> areNotificationsEnabled() async {
-    if (kIsWeb || !Platform.isAndroid) return false;
-    return await _android?.areNotificationsEnabled() ?? false;
+    if (kIsWeb) return false;
+    if (Platform.isAndroid) {
+      return await _android?.areNotificationsEnabled() ?? false;
+    }
+    if (Platform.isIOS) {
+      return (await _ios?.checkPermissions())?.isEnabled ?? false;
+    }
+    return false;
   }
 
   @override
   Future<bool> requestPermission() async {
-    if (kIsWeb || !Platform.isAndroid) return false;
-    return await _android?.requestNotificationsPermission() ?? false;
+    if (kIsWeb) return false;
+    if (Platform.isAndroid) {
+      return await _android?.requestNotificationsPermission() ?? false;
+    }
+    if (Platform.isIOS) {
+      return await _ios?.requestPermissions(
+            alert: true,
+            badge: true,
+            sound: true,
+          ) ??
+          false;
+    }
+    return false;
   }
 
   @override
   Future<void> openSettings() async {
-    if (kIsWeb || !Platform.isAndroid) return;
-    await _android?.openAppNotificationSettings();
+    if (kIsWeb) return;
+    if (Platform.isAndroid) {
+      await _android?.openAppNotificationSettings();
+    } else if (Platform.isIOS) {
+      await _ios?.openAppNotificationSettings();
+    }
   }
 
   @override
@@ -105,6 +137,8 @@ class LocalReminderNotifications implements ReminderNotificationGateway {
     final date = '${moment.month}月${moment.day}日';
     final title = switch (reminder.kind) {
       ReminderKind.keepAlive => '保号截止提醒 · ${displayPhone(subscription.number)}',
+      ReminderKind.keepAliveConstraint =>
+        '${reminder.ruleTitle ?? '附加保号条件'} · ${displayPhone(subscription.number)}',
       ReminderKind.planExpiry =>
         '套餐到期提醒 · ${displayPhone(subscription.number)}',
       ReminderKind.activationDeadline =>

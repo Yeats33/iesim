@@ -27,6 +27,7 @@ void main() {
 
     await tester.tap(find.text('设置'));
     await tester.pumpAndSettle();
+    expect(find.text('显示 Nekoko Tag'), findsOneWidget);
     await tester.tap(find.text('深色'));
     await tester.pumpAndSettle();
     expect(find.text('ieSIM 数据属于你'), findsOneWidget);
@@ -227,12 +228,22 @@ void main() {
     expect(find.textContaining('个人 EID'), findsNothing);
     await tester.tap(find.textContaining('工作 EID').last);
     await tester.pumpAndSettle();
-    final operatorField = find.ancestor(
-      of: find.text('运营商'),
-      matching: find.byType(TextFormField),
+    final operatorField = find.byKey(const ValueKey('profile-operator-field'));
+    await tester.scrollUntilVisible(
+      operatorField,
+      320,
+      scrollable: find
+          .descendant(
+            of: find.byType(SubscriptionFormPage),
+            matching: find.byType(Scrollable),
+          )
+          .first,
     );
     await tester.enterText(operatorField, '工作测试运营商');
     await tester.tap(find.widgetWithText(TextButton, '保存'));
+    await tester.pumpAndSettle();
+    expect(find.text('保存前确认兼容性'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '仍然保存'));
     await tester.pumpAndSettle();
 
     expect(controller.subscriptions, hasLength(1));
@@ -285,7 +296,8 @@ void main() {
           eidId: 'nekoko-eid:eid-1',
           iccid: '8944304253496424814f',
           operatorName: 'CTExcel',
-          nickname: 'CTExcel eSIM t:+44_7726_751499',
+          nickname: 'CTExcel eSIM',
+          nekokoTagsRaw: 't:+44_7726_751499',
           createdAt: now,
           updatedAt: now,
         ),
@@ -299,8 +311,12 @@ void main() {
     expect(find.text('已激活 Profile'), findsOneWidget);
     expect(find.text('CTExcel eSIM'), findsOneWidget);
     expect(find.text('Profile'), findsOneWidget);
-    expect(find.text('+44_7726_751499'), findsOneWidget);
+    expect(find.text('+44_7726_751499'), findsNothing);
     expect(find.text('从第一个 Profile 开始'), findsNothing);
+
+    expect(await controller.setShowNekokoTags(true), isNull);
+    await tester.pumpAndSettle();
+    expect(find.text('+44_7726_751499'), findsOneWidget);
 
     await tester.ensureVisible(find.text('CTExcel eSIM'));
     await tester.tap(find.text('CTExcel eSIM'));
@@ -595,6 +611,31 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('新建普通实体卡不要求卡片 ICCID', (tester) async {
+    final controller = AppController.inMemory();
+    await controller.initialize(defaultTimeZoneId: 'UTC');
+    await tester.pumpWidget(IesimApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('设备'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(Tab, 'SIM / eSIM'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '添加卡片'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('ICCID'), findsNothing);
+    await tester.enterText(find.widgetWithText(TextField, '卡片名称 *'), '备用实体卡');
+    await tester.tap(find.widgetWithText(FilledButton, '保存卡片'));
+    await tester.pumpAndSettle();
+
+    expect(controller.assets.cards, hasLength(1));
+    expect(controller.assets.cards.single, isA<PhysicalSimCard>());
+    expect(controller.assets.cards.single.physicalIccid, isNull);
+    expect(find.text('普通实体 SIM · 无 EID'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('内置 eSIM 以不可拆卸的卡槽加卡片组合显示', (tester) async {
     tester.view.physicalSize = const Size(420, 900);
     tester.view.devicePixelRatio = 1;
@@ -650,17 +691,61 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('设备'));
     await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(Tab, 'SIM / eSIM'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('89049032000000000000000000000001'),
+      findsOneWidget,
+    );
+    expect(find.text('ICCID'), findsNothing);
+    await tester.tap(find.widgetWithText(Tab, '设备'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('测试手机'));
     await tester.pumpAndSettle();
 
     expect(find.text('内置 eUICC · 不可拆卸'), findsOneWidget);
     expect(find.text('物理卡可更换；内置 eSIM 是卡槽与不可拆 eUICC 的组合'), findsOneWidget);
-    await tester.tap(find.text('内置 eSIM'));
+    expect(find.text('5G SA 漫游'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('编辑卡槽'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, '卡槽名称'), '设备内置卡槽');
+    await tester.tap(find.widgetWithText(FilledButton, '保存'));
+    await tester.pumpAndSettle();
+    expect(controller.assets.slots.single.label, '设备内置卡槽');
+
+    await tester.tap(find.text('设备内置卡槽'));
     await tester.pumpAndSettle();
 
     expect(find.text('安装方式'), findsOneWidget);
     expect(find.text('与设备永久绑定，不可移出或换卡'), findsOneWidget);
-    expect(find.byTooltip('编辑卡片'), findsNothing);
+    expect(find.text('EID 数量'), findsOneWidget);
+    expect(find.byTooltip('编辑卡片'), findsOneWidget);
+    expect(find.byTooltip('编辑 EID'), findsOneWidget);
+    expect(find.text('ICCID'), findsNothing);
+
+    await tester.tap(find.byTooltip('编辑 EID'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, '标签（可选）'), '主 EID');
+    await tester.tap(find.widgetWithText(FilledButton, '保存'));
+    await tester.pumpAndSettle();
+    expect(controller.assets.eids.single.label, '主 EID');
+
+    await tester.tap(find.byTooltip('编辑卡片'));
+    await tester.pumpAndSettle();
+    expect(find.text('内置 eUICC'), findsWidgets);
+    expect(find.textContaining('内置类型由设备绑定关系决定'), findsOneWidget);
+    expect(find.textContaining('ICCID'), findsNothing);
+    await tester.enterText(
+      find.widgetWithText(TextField, '卡片名称 *'),
+      '已编辑内置 eUICC',
+    );
+    await tester.enterText(find.widgetWithText(TextField, '备注（可选）'), '可编辑备注');
+    await tester.tap(find.widgetWithText(FilledButton, '保存卡片'));
+    await tester.pumpAndSettle();
+    expect(controller.assets.cards.single.name, '已编辑内置 eUICC');
+    expect(controller.assets.cards.single.note, '可编辑备注');
     expect(tester.takeException(), isNull);
   });
 }

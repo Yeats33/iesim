@@ -59,8 +59,7 @@ INSERT INTO profile_storage VALUES ('8900001', '8986001', 63200, 1);
       (item) => item.iccid == '8986002',
     );
     expect(numbered.number.value, '+4912345');
-    expect(numbered.tags, containsAll(['欧洲', '备用']));
-    expect(numbered.tags, isNot(contains('Nekoko导入')));
+    expect(numbered.tags, isEmpty);
     expect(numbered.details.profileName, '旅行卡');
     expect(numbered.details.profileClassCode, 2);
     expect(numbered.details.declaredProfileSizeBytes, 48000);
@@ -77,6 +76,11 @@ INSERT INTO profile_storage VALUES ('8900001', '8986001', 63200, 1);
     expect(report.assets.eids.single.value, '8900001');
     expect(report.assets.profiles.single.iccid, '8986001');
     expect(report.assets.profiles.single.subscriptionId, numbered.id);
+    expect(report.assets.profiles.single.nickname, '旅行卡');
+    expect(
+      NekokoTagCodec.decode(report.assets.profiles.single.nekokoTagsRaw!).tags,
+      containsAll([NekokoTextTag('欧洲'), NekokoTextTag('备用')]),
+    );
     expect(report.issues.single.message, contains('缺少 EID'));
   });
 
@@ -127,6 +131,7 @@ INSERT INTO profile_metadata VALUES
       eidId: eid.id,
       iccid: '8986001',
       subscriptionId: subscription.id,
+      isPinned: true,
       createdAt: old,
       updatedAt: old,
     );
@@ -147,8 +152,13 @@ INSERT INTO profile_metadata VALUES
     expect(report.assets.cards, isEmpty);
     expect(report.assets.eids, isEmpty);
     expect(report.assets.profiles.single.id, 'profile-existing');
-    expect(report.assets.profiles.single.nickname, contains('新昵称'));
-    expect(report.subscriptions.single.tags, containsAll(['旧标签', '新标签']));
+    expect(report.assets.profiles.single.isPinned, isTrue);
+    expect(report.assets.profiles.single.nickname, '新昵称');
+    expect(
+      NekokoTagCodec.decode(report.assets.profiles.single.nekokoTagsRaw!).tags,
+      contains(NekokoTextTag('新标签')),
+    );
+    expect(report.subscriptions.single.tags, ['旧标签']);
     expect(report.subscriptions.single.details.profileName, '新昵称');
   });
 }

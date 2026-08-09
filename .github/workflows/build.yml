@@ -104,9 +104,9 @@ jobs:
           java-version: '17'
           cache: gradle
       - uses: android-actions/setup-android@v3
-      - name: Install Android SDK 37
+      - name: Install Android SDK 37.0
         shell: bash
-        run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0'
+        run: sdkmanager --channel=3 'platforms;android-37.0' 'build-tools;36.0.0'
       - uses: subosito/flutter-action@v2
         with:
           channel: stable

@@ -2,13 +2,14 @@
 
 [![Build ieSIM](https://github.com/Yeats33/iesim/actions/workflows/build.yml/badge.svg)](https://github.com/Yeats33/iesim/actions/workflows/build.yml)
 
-SIM/eSIM 订阅、保号与设备资产管理 Flutter 应用。产品名称为 **ieSIM**，当前版本为 **v0.0.1-alpha**（build 1，`0.0.1-alpha+1`）。
+SIM/eSIM 订阅、保号与设备资产管理 Flutter 应用。产品名称为 **ieSIM**，当前版本为 **v0.0.1-bate**（构建号由 CI 运行编号生成）。
 
 ## 已实现
 
 - 订阅总览、搜索筛选、详情编辑、充值/通话/短信/续费历史
 - Profile 余额管理：设定、增加或减少余额，当前余额与期末流水同事务保存并参与同步
 - Profile AFF 管理：自定义推荐项目、优惠码复制、HTTPS 外链及清晰推广披露；内置 9eSIM、eSTK.me、eSIM.gg、RedteaGO 与 CTExcel UK 推荐
+- Profile 号码绑定管理：记录号码关联的 App、账号用途、验证状态与商店资料；内置 WhatsApp 预设且不读取短信或验证码
 - Profile 分为已激活、未激活与过期博物馆；支持激活期限/要求、归档原因及可配置的到期自动归档
 - 保号截止与套餐到期独立计算，按订阅 IANA 时区展示
 - Android/iOS 本地通知预排程，点击直达订阅；Android 开机后恢复
@@ -36,7 +37,7 @@ SIM/eSIM 订阅、保号与设备资产管理 Flutter 应用。产品名称为 *
 - iOS 未签名 IPA（安装前需要使用自己的证书签名）
 - 每个平台的 SHA-256 校验文件
 
-推送与 `pubspec.yaml` 完整版本一致的 Tag（例如 `v0.0.1-alpha+1`）会自动创建或更新 GitHub prerelease，并附加全部产物。Android 未配置密钥时使用开发签名；正式签名可设置 `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS` 和 `ANDROID_KEY_PASSWORD` 四个 Actions Secrets。
+推送与 `pubspec.yaml` 完整版本一致的 Tag（例如 `v0.0.1-bate`）会自动创建或更新 GitHub prerelease，并附加全部产物。Android 未配置密钥时使用开发签名；正式签名可设置 `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS` 和 `ANDROID_KEY_PASSWORD` 四个 Actions Secrets。
 
 ## 安全边界
 

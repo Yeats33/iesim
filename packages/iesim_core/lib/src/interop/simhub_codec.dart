@@ -6,6 +6,7 @@ import '../model/appearance.dart';
 import '../model/assets.dart';
 import '../model/keep_alive.dart';
 import '../model/plan.dart';
+import '../model/phone_app_binding.dart';
 import '../model/profile_lifecycle.dart';
 import '../model/subscription.dart';
 import '../model/subscription_details.dart';
@@ -754,6 +755,11 @@ class SimHubCodec {
           index,
           issues,
         ),
+        appBindings: _decodeAppBindings(
+          map['_iesimAppBindings'],
+          index,
+          issues,
+        ),
         autoTopUpEnabled: _boolean(map['autoTopUpEnabled']) ?? false,
         topUpCycleUnit: _nonEmpty(map['topUpCycleUnit']),
         renewalIntervalValue: _positiveInt(
@@ -917,6 +923,9 @@ class SimHubCodec {
       '_iesimAffiliateOffers': subscription.details.affiliateOffers
           .map((offer) => offer.toJson())
           .toList(),
+      '_iesimAppBindings': subscription.details.appBindings
+          .map((binding) => binding.toJson())
+          .toList(),
       'autoTopUpEnabled': subscription.details.autoTopUpEnabled,
       'topUpCycleUnit': subscription.details.topUpCycleUnit,
       'renewalIntervalValue': subscription.details.renewalIntervalValue,
@@ -1070,6 +1079,33 @@ class SimHubCodec {
       }
     }
     return offers;
+  }
+
+  List<PhoneAppBinding> _decodeAppBindings(
+    dynamic raw,
+    int index,
+    List<SimHubImportIssue> issues,
+  ) {
+    if (raw == null) return const [];
+    if (raw is! List) {
+      issues.add(_issue(index, '_iesimAppBindings', '必须是数组，已忽略'));
+      return const [];
+    }
+    final bindings = <PhoneAppBinding>[];
+    for (var bindingIndex = 0; bindingIndex < raw.length; bindingIndex++) {
+      try {
+        bindings.add(
+          PhoneAppBinding.fromJson(
+            Map<String, dynamic>.from(raw[bindingIndex] as Map),
+          ),
+        );
+      } catch (_) {
+        issues.add(
+          _issue(index, '_iesimAppBindings[$bindingIndex]', '号码绑定格式无效，已忽略'),
+        );
+      }
+    }
+    return bindings;
   }
 
   LpaActivation? _decodeActivation(

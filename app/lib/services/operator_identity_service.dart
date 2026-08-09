@@ -32,7 +32,7 @@ class HttpOperatorIdentityTransport implements OperatorIdentityTransport {
       final request = await client.getUrl(uri);
       request.headers.set(
         HttpHeaders.userAgentHeader,
-        'iesim/0.0.1-alpha operator-identity',
+        'iesim/0.0.1-bate operator-identity',
       );
       if (etag != null) {
         request.headers.set(HttpHeaders.ifNoneMatchHeader, etag);

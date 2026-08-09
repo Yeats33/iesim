@@ -278,7 +278,7 @@ class HttpCarrierNetworkCatalogTransport
       final request = await client.getUrl(uri);
       request.headers.set(
         HttpHeaders.userAgentHeader,
-        'iesim/0.0.1-alpha carrier-catalog',
+        'iesim/0.0.1-bate carrier-catalog',
       );
       final response = await request.close().timeout(
         const Duration(seconds: 15),

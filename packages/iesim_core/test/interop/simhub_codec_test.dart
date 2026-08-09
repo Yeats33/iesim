@@ -357,7 +357,7 @@ void main() {
       ),
       tags: const ['旅行'],
       appearance: const Appearance(flag: '🇨🇳', cardColorHex: '#0C615F'),
-      details: const SubscriptionDetails(
+      details: SubscriptionDetails(
         profileName: '英国主号',
         isPinned: true,
         profileClassCode: 2,
@@ -366,7 +366,7 @@ void main() {
         gid1: '01',
         gid2: '02',
         affiliateOffers: [
-          AffiliateOffer(
+          const AffiliateOffer(
             id: 'aff-1',
             brand: 'CTExcel UK',
             category: AffiliateOfferCategory.mobileOperator,
@@ -374,6 +374,18 @@ void main() {
                 'https://www.ctexcel.com/uk/buyCard/buyCardPackage/1?recommendCode=RNAFZW',
             promoCode: 'RNAFZW',
             isBuiltIn: true,
+          ),
+        ],
+        appBindings: [
+          PhoneAppBinding(
+            id: 'binding-1',
+            phoneNumber: '+8613800000000',
+            appName: 'WhatsApp Messenger',
+            presetId: 'whatsapp',
+            purposes: const [PhoneAppBindingPurpose.messaging],
+            verificationChannels: const [PhoneVerificationChannel.sms],
+            createdAt: DateTime.utc(2026, 8, 1),
+            updatedAt: DateTime.utc(2026, 8, 2),
           ),
         ],
       ),
@@ -408,6 +420,7 @@ void main() {
       restored.details.affiliateOffers,
       subscription.details.affiliateOffers,
     );
+    expect(restored.details.appBindings, subscription.details.appBindings);
     expect(decoded.activityRecords.single, activity);
   });
 

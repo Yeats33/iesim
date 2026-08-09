@@ -6,6 +6,7 @@ import '../model/appearance.dart';
 import '../model/assets.dart';
 import '../model/keep_alive.dart';
 import '../model/plan.dart';
+import '../model/phone_app_binding.dart';
 import '../model/profile_lifecycle.dart';
 import '../model/subscription.dart';
 import '../model/subscription_details.dart';
@@ -154,6 +155,9 @@ class SyncSnapshotCodec {
       'affiliateOffers': item.details.affiliateOffers
           .map((offer) => offer.toJson())
           .toList(),
+      'appBindings': item.details.appBindings
+          .map((binding) => binding.toJson())
+          .toList(),
       'autoTopUpEnabled': item.details.autoTopUpEnabled,
       'topUpCycleUnit': item.details.topUpCycleUnit,
       'renewalIntervalValue': item.details.renewalIntervalValue,
@@ -262,6 +266,9 @@ class SyncSnapshotCodec {
             .map(
               (value) => AffiliateOffer.fromJson(_map(value, 'affiliateOffer')),
             )
+            .toList(growable: false),
+        appBindings: _list(details, 'appBindings')
+            .map((value) => PhoneAppBinding.fromJson(_map(value, 'appBinding')))
             .toList(growable: false),
         autoTopUpEnabled: _requiredBool(details, 'autoTopUpEnabled'),
         topUpCycleUnit: _optionalString(details, 'topUpCycleUnit'),

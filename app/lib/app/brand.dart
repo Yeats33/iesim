@@ -1,7 +1,7 @@
 abstract final class AppBrand {
   static const name = 'ieSIM';
   static const tagline = 'SIM 与 eSIM 资产管家';
-  static const version = '0.0.1-alpha';
+  static const version = '0.0.1-bate';
 }
 
 abstract final class AppAuthor {

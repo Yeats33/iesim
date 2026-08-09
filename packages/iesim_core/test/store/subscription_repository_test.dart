@@ -4,6 +4,7 @@ import 'package:iesim_core/src/model/appearance.dart';
 import 'package:iesim_core/src/model/affiliate_offer.dart';
 import 'package:iesim_core/src/model/keep_alive.dart';
 import 'package:iesim_core/src/model/plan.dart';
+import 'package:iesim_core/src/model/phone_app_binding.dart';
 import 'package:iesim_core/src/model/profile_lifecycle.dart';
 import 'package:iesim_core/src/model/subscription.dart';
 import 'package:iesim_core/src/model/subscription_details.dart';
@@ -103,6 +104,18 @@ void main() {
           url: 'https://www.9esim.com/?coupon=yeats2',
           promoCode: 'yeats2',
           isBuiltIn: true,
+        ),
+      ],
+      appBindings: [
+        PhoneAppBinding(
+          id: 'binding-1',
+          phoneNumber: '+8613800000000',
+          appName: 'WhatsApp Messenger',
+          presetId: 'whatsapp',
+          purposes: const [PhoneAppBindingPurpose.messaging],
+          verificationChannels: const [PhoneVerificationChannel.sms],
+          createdAt: DateTime.utc(2026, 8, 1),
+          updatedAt: DateTime.utc(2026, 8, 7),
         ),
       ],
       autoTopUpEnabled: true,

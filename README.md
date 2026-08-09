@@ -1,6 +1,8 @@
 # ieSIM
 
-SIM/eSIM 订阅、保号与设备资产管理 Android 应用。产品名称为 **ieSIM**，当前版本为 **v0.0.1-alpha**（build 1，`0.0.1-alpha+1`）。
+[![Build ieSIM](https://github.com/Yeats33/iesim/actions/workflows/build.yml/badge.svg)](https://github.com/Yeats33/iesim/actions/workflows/build.yml)
+
+SIM/eSIM 订阅、保号与设备资产管理 Flutter 应用。产品名称为 **ieSIM**，当前版本为 **v0.0.1-alpha**（build 1，`0.0.1-alpha+1`）。
 
 ## 已实现
 
@@ -9,20 +11,33 @@ SIM/eSIM 订阅、保号与设备资产管理 Android 应用。产品名称为 *
 - Profile AFF 管理：自定义推荐项目、优惠码复制、HTTPS 外链及清晰推广披露；内置 9eSIM、eSTK.me、eSIM.gg、RedteaGO 与 CTExcel UK 推荐
 - Profile 分为已激活、未激活与过期博物馆；支持激活期限/要求、归档原因及可配置的到期自动归档
 - 保号截止与套餐到期独立计算，按订阅 IANA 时区展示
-- Android 本地通知预排程，开机后恢复，点击直达订阅
+- Android/iOS 本地通知预排程，点击直达订阅；Android 开机后恢复
 - 设备、物理/内置卡槽、实体 SIM、可拆 eUICC、内置 eUICC、EID 与 Profile 的完整关系
 - 从独立 GitHub 数据仓库热更新手机型号预设，支持搜索、一键填写、ETag 缓存与离线回退
 - 卡片换机/入库、Profile 迁移/擦除的独立资产事件流，并对内置 eUICC 强制不可拆卸约束
 - 相机扫码、从相册/截图识别或粘贴 `LPA:1$...` 导入；支持需要独立确认码的 QR
 - 按 SM-DP+ 与 PLMN 从 EUICC.Info 公共目录精确匹配 Profile/服务商
+- 按 MCC/MNC、GID1/GID2、Profile 名和服务商名匹配网络运营商与 Logo；兼容 NekokoLPA2 的 operator-icons 目录，Logo 本地缓存并支持离线显示
 - SimHub v5 完整备份导入导出：设备归属、休眠卡、余额流水、AFF、自动充值、备用号码、国家、运营商 App 与交易备注等字段均可往返
 - SimJ 兼容扁平 JSON 导入导出
-- Nekoko nickname 标签双向转换，以及 Nekoko SQLite 备份的只读导入；名称、运营商、标签、enabled、EID/ICCID、类别、GID、实际占用空间与缓存号码会转换成 ieSIM 原生 Profile，导入后直接回首页编辑
+- Nekoko Tag 独立保存为默认隐藏的外部元数据，以及 Nekoko SQLite 备份的只读导入；用户确认后可提取手机号、标签和日期到 ieSIM 原生字段
 - WebDAV 单快照同步、ETag 乐观锁、订阅与资产的记录级合并、删除墓碑与冲突日志
 - 浅色、深色与跟随系统主题
 
-`packages/iesim_core` 包含可在无图形环境运行的领域、SQLite、互操作与同步逻辑；`app` 是 Flutter Android 客户端。完成度见 `docs/feature-matrix.md`，设备与运营商预设仓库格式分别见 `docs/device-preset-catalog.md`、`docs/carrier-preset-catalog.md`，设计决策见 `docs/superpowers/specs/2026-08-07-iesim-design.md`。
+`packages/iesim_core` 包含可在无图形环境运行的领域、SQLite、互操作与同步逻辑；`app` 是 Flutter Android/iOS 客户端。完成度见 `docs/feature-matrix.md`，设备与运营商预设仓库格式分别见 `docs/device-preset-catalog.md`、`docs/carrier-preset-catalog.md`，设计决策见 `docs/superpowers/specs/2026-08-07-iesim-design.md`。
+
+第三方代码与数据源说明见 `THIRD_PARTY_NOTICES.md`。
+
+## CI 构建
+
+`.github/workflows/build.yml` 参考 NekokoLPA2 的多 job 流程：先读取 `app/pubspec.yaml` 版本并完成分析和测试，再并行构建 Android 与 iOS。每次 `main` push、PR 和手动运行都会上传以下 Actions Artifact：
+
+- Android 通用、ARM64、ARMv7、x86_64 APK，以及 AAB
+- iOS 未签名 IPA（安装前需要使用自己的证书签名）
+- 每个平台的 SHA-256 校验文件
+
+推送与 `pubspec.yaml` 完整版本一致的 Tag（例如 `v0.0.1-alpha+1`）会自动创建或更新 GitHub prerelease，并附加全部产物。Android 未配置密钥时使用开发签名；正式签名可设置 `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS` 和 `ANDROID_KEY_PASSWORD` 四个 Actions Secrets。
 
 ## 安全边界
 
-LPA 导入会安全保存凭据并创建订阅，不会擅自下载、安装、启用或删除真实 eSIM Profile。服务商匹配只下载公共目录，不会把用户的 SM-DP+、Matching ID 或确认码发送给匹配服务。Nekoko 导入不读取写卡密钥、通知载荷或远端服务器历史。SimHub 备份中非 SIM 资产的 `services` / `boundServices` 可能带有账户或服务器信息，导入预览会显示数量但不写入。
+LPA 导入会安全保存凭据并创建订阅，不会擅自下载、安装、启用或删除真实 eSIM Profile。服务商匹配只下载公共目录，不会把用户的 SM-DP+、Matching ID 或确认码发送给匹配服务。运营商 Logo 匹配只按 MCC 下载对应的 operator-icons 目录；MNC、GID、Profile 名和服务商名均在本机参与打分，不会作为请求参数发送。Nekoko 导入不读取写卡密钥、通知载荷或远端服务器历史。SimHub 备份中非 SIM 资产的 `services` / `boundServices` 可能带有账户或服务器信息，导入预览会显示数量但不写入。

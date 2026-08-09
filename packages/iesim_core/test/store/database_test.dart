@@ -47,8 +47,6 @@ void main() {
       expect(
         columns,
         containsAll([
-          'smdp_address',
-          'activation_code',
           'keepalive_policy_json',
           'mcc',
           'mnc',
@@ -58,6 +56,48 @@ void main() {
           'installed_profile_size_bytes',
         ]),
       );
+      expect(
+        columns,
+        isNot(
+          containsAll([
+            'smdp_address',
+            'activation_code',
+            'activation_extra',
+            'confirmation_code',
+          ]),
+        ),
+      );
+      db.close();
+    });
+
+    test('高频列表排序使用专用索引', () {
+      final db = openIesimStore(':memory:');
+      final subscriptionIndexes = db
+          .select('PRAGMA index_list(subscriptions)')
+          .map((row) => row['name']);
+      final activityIndexes = db
+          .select('PRAGMA index_list(activity_records)')
+          .map((row) => row['name']);
+
+      expect(subscriptionIndexes, contains('idx_subscriptions_order'));
+      expect(activityIndexes, contains('idx_activity_sub_occ'));
+      expect(activityIndexes, contains('idx_activity_occurred'));
+      final subscriptionPlan = db
+          .select(
+            'EXPLAIN QUERY PLAN SELECT * FROM subscriptions '
+            'ORDER BY order_index ASC, created_at ASC',
+          )
+          .map((row) => row['detail'].toString())
+          .join(' ');
+      final activityPlan = db
+          .select(
+            'EXPLAIN QUERY PLAN SELECT * FROM activity_records '
+            'ORDER BY occurred_at ASC, id ASC',
+          )
+          .map((row) => row['detail'].toString())
+          .join(' ');
+      expect(subscriptionPlan, contains('idx_subscriptions_order'));
+      expect(activityPlan, contains('idx_activity_occurred'));
       db.close();
     });
 
@@ -96,7 +136,12 @@ PRAGMA user_version = 1;
       expect(db.select('SELECT * FROM subscriptions'), isEmpty);
       expect(
         db.select('PRAGMA table_info(profiles)').map((row) => row['name']),
-        containsAll(['nickname', 'subscription_id', 'updated_at']),
+        containsAll([
+          'nickname',
+          'nekoko_tags_raw',
+          'subscription_id',
+          'updated_at',
+        ]),
       );
       db.close();
     });

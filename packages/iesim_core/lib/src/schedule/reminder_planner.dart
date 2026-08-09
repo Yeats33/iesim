@@ -3,8 +3,15 @@ import '../model/profile_lifecycle.dart';
 import '../model/subscription.dart';
 import '../time/calendar.dart';
 import '../time/clock.dart';
+import '../keepalive/rule_engine.dart';
 
-enum ReminderKind { keepAlive, planExpiry, activationDeadline, profileExpiry }
+enum ReminderKind {
+  keepAlive,
+  keepAliveConstraint,
+  planExpiry,
+  activationDeadline,
+  profileExpiry,
+}
 
 /// 一次可交给平台本地通知预排程的提醒。
 class ScheduledReminder {
@@ -17,6 +24,8 @@ class ScheduledReminder {
   final DateTime deadlineUtc;
   final int daysBefore;
   final bool inferred;
+  final String? ruleId;
+  final String? ruleTitle;
 
   ScheduledReminder({
     required this.subscriptionId,
@@ -26,13 +35,17 @@ class ScheduledReminder {
     required this.deadlineUtc,
     required this.daysBefore,
     required this.inferred,
+    this.ruleId,
+    this.ruleTitle,
   }) {
     if (!fireAtUtc.isUtc || !deadlineUtc.isUtc) {
       throw ArgumentError('提醒时刻与截止时刻必须是 UTC');
     }
   }
 
-  String get stableKey => '$subscriptionId:${kind.name}:$slot';
+  String get stableKey => ruleId == null
+      ? '$subscriptionId:${kind.name}:$slot'
+      : '$subscriptionId:${kind.name}:$ruleId:$slot';
 }
 
 /// 根据订阅变更一次性计算全部未来通知，不依赖后台轮询。
@@ -93,6 +106,28 @@ class ReminderPlanner {
         ),
       );
     }
+    final ruleEvaluation = KeepAliveRuleEngine(
+      clock: _clock,
+    ).evaluate(subscription);
+    for (final rule in ruleEvaluation.rules) {
+      if (rule.id == 'cycle' || rule.deadlineUtc == null) continue;
+      if (rule.state == KeepAliveRuleState.satisfied ||
+          rule.state == KeepAliveRuleState.overdue ||
+          rule.state == KeepAliveRuleState.notApplicable ||
+          rule.state == KeepAliveRuleState.unknown) {
+        continue;
+      }
+      events.addAll(
+        _planDeadline(
+          subscription: subscription,
+          kind: ReminderKind.keepAliveConstraint,
+          deadlineUtc: rule.deadlineUtc!,
+          inferred: rule.inferred,
+          ruleId: rule.id,
+          ruleTitle: rule.title,
+        ),
+      );
+    }
     final expiry = subscription.plan.expiryDate;
     if (expiry != null) {
       events.addAll(
@@ -124,6 +159,8 @@ class ReminderPlanner {
     required ReminderKind kind,
     required DateTime deadlineUtc,
     required bool inferred,
+    String? ruleId,
+    String? ruleTitle,
   }) {
     final now = _clock.nowUtc();
     final calendar = ZonedCalendar(subscription.timeZoneId);
@@ -147,6 +184,8 @@ class ReminderPlanner {
           deadlineUtc: deadlineUtc,
           daysBefore: offset,
           inferred: inferred,
+          ruleId: ruleId,
+          ruleTitle: ruleTitle,
         ),
       );
     }
@@ -166,6 +205,8 @@ class ReminderPlanner {
           deadlineUtc: deadlineUtc,
           daysBefore: daysLeft,
           inferred: inferred,
+          ruleId: ruleId,
+          ruleTitle: ruleTitle,
         ),
       );
     }

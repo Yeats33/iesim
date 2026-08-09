@@ -5,6 +5,7 @@ import '../app/app_scope.dart';
 import '../util/formatters.dart';
 import '../widgets/activation_qr_view.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/operator_identity_line.dart';
 import '../widgets/section_card.dart';
 import '../widgets/status_badge.dart';
 import 'affiliate_management_page.dart';
@@ -32,6 +33,8 @@ class SubscriptionDetailPage extends StatelessWidget {
     }
 
     final status = controller.statusOf(subscription);
+    final assetProfile = controller.assetProfileForSubscription(subscription);
+    final keepAliveEvaluation = controller.keepAliveEvaluationOf(subscription);
     final records = controller.activitiesFor(subscription.id);
     final scheme = Theme.of(context).colorScheme;
     final accent =
@@ -125,7 +128,18 @@ class SubscriptionDetailPage extends StatelessWidget {
                         _showActivitySheet(context, subscription, type),
                   ),
                   const SizedBox(height: 16),
-                  _KeepAliveCard(subscription: subscription, status: status),
+                  _KeepAliveCard(
+                    subscription: subscription,
+                    status: status,
+                    evaluation: keepAliveEvaluation,
+                    onSetCompleted: (rule, completed) =>
+                        _setKeepAliveRuleCompleted(
+                          context,
+                          subscription,
+                          rule,
+                          completed,
+                        ),
+                  ),
                 ],
                 const SizedBox(height: 16),
                 _PlanCard(subscription: subscription),
@@ -369,6 +383,16 @@ class SubscriptionDetailPage extends StatelessWidget {
                             : subscription.tags.join(' · '),
                         icon: Icons.sell_outlined,
                       ),
+                      if (controller.showNekokoTags &&
+                          assetProfile?.nekokoTagsRaw?.trim().isNotEmpty ==
+                              true) ...[
+                        const Divider(),
+                        InfoRow(
+                          label: 'Nekoko Tag',
+                          value: assetProfile!.nekokoTagsRaw!,
+                          icon: Icons.label_outline_rounded,
+                        ),
+                      ],
                       if (subscription.appearance.customPrompt != null) ...[
                         const Divider(),
                         InfoRow(
@@ -410,6 +434,58 @@ class SubscriptionDetailPage extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _setKeepAliveRuleCompleted(
+    BuildContext context,
+    Subscription subscription,
+    KeepAliveRuleEvaluation rule,
+    bool completed,
+  ) async {
+    String? note;
+    if (completed) {
+      final controller = TextEditingController();
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('确认「${rule.title}」已完成？'),
+          content: TextField(
+            controller: controller,
+            maxLength: 500,
+            minLines: 2,
+            maxLines: 4,
+            decoration: const InputDecoration(
+              labelText: '完成备注（可选）',
+              hintText: '例如付款订单号、动作发生地区',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('确认完成'),
+            ),
+          ],
+        ),
+      );
+      note = controller.text;
+      controller.dispose();
+      if (confirmed != true || !context.mounted) return;
+    }
+    final error = await AppScope.of(context).setKeepAliveConstraintCompleted(
+      subscriptionId: subscription.id,
+      constraintId: rule.id,
+      completed: completed,
+      note: note,
+    );
+    if (error != null && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), behavior: SnackBarBehavior.floating),
+      );
+    }
   }
 
   Future<void> _showActivitySheet(
@@ -627,17 +703,15 @@ class _IdentityHero extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Text(
-                    subscription.appearance.flag ?? '◉',
-                    style: const TextStyle(fontSize: 24, color: Colors.white),
-                  ),
-                  const SizedBox(width: 9),
                   Expanded(
-                    child: Text(
-                      subscription.operator ?? '未填写运营商',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white.withValues(alpha: .86),
-                      ),
+                    child: OperatorIdentityLine(
+                      subscription: subscription,
+                      iconSize: 32,
+                      iconBackgroundColor: Colors.white,
+                      textStyle: Theme.of(context).textTheme.titleMedium
+                          ?.copyWith(
+                            color: Colors.white.withValues(alpha: .86),
+                          ),
                     ),
                   ),
                   Icon(
@@ -924,10 +998,18 @@ class _QuickAction extends StatelessWidget {
 }
 
 class _KeepAliveCard extends StatelessWidget {
-  const _KeepAliveCard({required this.subscription, required this.status});
+  const _KeepAliveCard({
+    required this.subscription,
+    required this.status,
+    required this.evaluation,
+    required this.onSetCompleted,
+  });
 
   final Subscription subscription;
   final KeepAliveStatus status;
+  final KeepAliveEvaluation evaluation;
+  final void Function(KeepAliveRuleEvaluation rule, bool completed)
+  onSetCompleted;
 
   @override
   Widget build(BuildContext context) {
@@ -941,9 +1023,12 @@ class _KeepAliveCard extends StatelessWidget {
           ).addDays(keepAlive.lastActivityAt!, keepAlive.cycleDays!)
         : null;
     final info = describeStatus(status);
+    final actionableCount = evaluation.actionableRules.length;
     return SectionCard(
       title: '保号状态',
-      subtitle: info.description,
+      subtitle: actionableCount == 0
+          ? info.description
+          : '$actionableCount 条规则需要处理 · ${info.description}',
       trailing: StatusBadge(status: status, compact: true),
       child: Column(
         children: [
@@ -987,18 +1072,19 @@ class _KeepAliveCard extends StatelessWidget {
               const Divider(),
               InfoRow(label: '规则说明', value: summary, icon: Icons.notes_rounded),
             ],
-            for (final constraint in keepAlive.policy.constraints) ...[
+            for (final rule in evaluation.rules.where(
+              (item) => item.id != 'cycle',
+            )) ...[
               const Divider(),
-              InfoRow(
-                label: constraint.title,
-                value: [
-                  if (constraint.withinDays != null)
-                    '${constraint.withinDays} 天内',
-                  if (constraint.regions.isNotEmpty)
-                    constraint.regions.join(' / '),
-                  constraint.details,
-                ].join(' · '),
-                icon: Icons.add_task_rounded,
+              _KeepAliveRuleTile(
+                rule: rule,
+                timeZoneId: subscription.timeZoneId,
+                manuallyCompleted: keepAlive.policy.constraints.any(
+                  (constraint) =>
+                      constraint.id == rule.id &&
+                      constraint.completedAt != null,
+                ),
+                onSetCompleted: (completed) => onSetCompleted(rule, completed),
               ),
             ],
             if (keepAlive.policy.sourceLabel case final source?) ...[
@@ -1010,6 +1096,124 @@ class _KeepAliveCard extends StatelessWidget {
               ),
             ],
           ],
+        ],
+      ),
+    );
+  }
+}
+
+class _KeepAliveRuleTile extends StatelessWidget {
+  const _KeepAliveRuleTile({
+    required this.rule,
+    required this.timeZoneId,
+    required this.manuallyCompleted,
+    required this.onSetCompleted,
+  });
+
+  final KeepAliveRuleEvaluation rule;
+  final String timeZoneId;
+  final bool manuallyCompleted;
+  final ValueChanged<bool> onSetCompleted;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final (icon, color, statusText) = switch (rule.state) {
+      KeepAliveRuleState.satisfied => (
+        Icons.task_alt_rounded,
+        scheme.primary,
+        rule.completedLate ? '已完成，但晚于期限' : '已完成',
+      ),
+      KeepAliveRuleState.safe => (
+        Icons.shield_outlined,
+        scheme.primary,
+        '剩余 ${rule.daysRemaining ?? 0} 天',
+      ),
+      KeepAliveRuleState.dueSoon => (
+        Icons.notification_important_outlined,
+        scheme.tertiary,
+        '剩余 ${rule.daysRemaining ?? 0} 天',
+      ),
+      KeepAliveRuleState.overdue => (
+        Icons.error_outline_rounded,
+        scheme.error,
+        '已超期 ${-(rule.daysRemaining ?? 0)} 天',
+      ),
+      KeepAliveRuleState.pending => (
+        Icons.schedule_rounded,
+        scheme.secondary,
+        '等待起算或有效动作',
+      ),
+      KeepAliveRuleState.needsConfirmation => (
+        Icons.fact_check_outlined,
+        scheme.tertiary,
+        '需要手动确认',
+      ),
+      KeepAliveRuleState.unknown => (
+        Icons.help_outline_rounded,
+        scheme.error,
+        '缺少判定资料',
+      ),
+      KeepAliveRuleState.notApplicable => (
+        Icons.remove_circle_outline,
+        scheme.outline,
+        '不适用',
+      ),
+    };
+    final metadata = <String>[
+      statusText,
+      if (rule.deadlineUtc != null)
+        '截止 ${formatZonedDate(rule.deadlineUtc!, timeZoneId)}',
+      if (rule.regions.isNotEmpty) '地区 ${rule.regions.join(' / ')}',
+      if (rule.evidenceAt != null)
+        '证据 ${formatZonedDate(rule.evidenceAt!, timeZoneId)}',
+      if (rule.inferred) '起算日期为推测值',
+    ];
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(icon, color: color, size: 21),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(rule.title, style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 2),
+                Text(
+                  metadata.join(' · '),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelSmall?.copyWith(color: color),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  rule.details,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                if (manuallyCompleted || rule.requiresManualConfirmation) ...[
+                  const SizedBox(height: 4),
+                  TextButton.icon(
+                    onPressed: () => onSetCompleted(!manuallyCompleted),
+                    icon: Icon(
+                      manuallyCompleted
+                          ? Icons.undo_rounded
+                          : Icons.check_rounded,
+                      size: 18,
+                    ),
+                    label: Text(manuallyCompleted ? '撤销手动确认' : '确认已完成'),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );

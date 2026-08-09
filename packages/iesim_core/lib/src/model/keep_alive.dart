@@ -23,7 +23,7 @@ enum KeepAliveAction {
   other,
 }
 
-/// 不直接参与周期截止日计算、但必须一起告知用户的附加条件。
+/// 周期规则之外的附加条件类型。
 enum KeepAliveConstraintKind {
   firstUse,
   afterPlanExpiry,
@@ -31,14 +31,34 @@ enum KeepAliveConstraintKind {
   custom,
 }
 
+/// 附加条件的完成判定方式。
+enum KeepAliveConstraintEvaluationMode {
+  /// 由符合条件的活动记录自动完成。
+  activity,
+
+  /// 必须由用户确认完成，例如付费休眠或带地区限制的动作。
+  manual,
+}
+
 class KeepAliveConstraint {
   KeepAliveConstraint({
+    String? id,
     required this.kind,
     required this.title,
     required this.details,
     this.withinDays,
     List<String> regions = const [],
-  }) : regions = List.unmodifiable(regions) {
+    KeepAliveConstraintEvaluationMode? evaluationMode,
+    Set<KeepAliveAction> qualifyingActions = const {},
+    this.anchorAt,
+    this.completedAt,
+    this.completionNote,
+  }) : id = id ?? _legacyConstraintId(kind, title),
+       regions = List.unmodifiable(regions),
+       evaluationMode =
+           evaluationMode ?? _defaultConstraintEvaluationMode(kind),
+       qualifyingActions = Set.unmodifiable(qualifyingActions) {
+    _requiredText(this.id, 'constraint.id', 80);
     _requiredText(title, 'constraint.title', 100);
     _requiredText(details, 'constraint.details', 1000);
     if (withinDays case final days? when days <= 0) {
@@ -50,20 +70,48 @@ class KeepAliveConstraint {
     for (final region in regions) {
       _requiredText(region, 'constraint.regions', 40);
     }
+    if (qualifyingActions.length > KeepAliveAction.values.length) {
+      throw const FormatException('附加条件的有效动作数量无效');
+    }
+    if (anchorAt case final value? when !value.isUtc) {
+      throw ArgumentError.value(value, 'anchorAt', '必须为 UTC 时刻');
+    }
+    if (completedAt case final value? when !value.isUtc) {
+      throw ArgumentError.value(value, 'completedAt', '必须为 UTC 时刻');
+    }
+    _optionalText(completionNote, 'constraint.completionNote', 500);
   }
 
+  /// 稳定规则 ID，用于提醒去重与手动完成状态。
+  final String id;
   final KeepAliveConstraintKind kind;
   final String title;
   final String details;
   final int? withinDays;
   final List<String> regions;
+  final KeepAliveConstraintEvaluationMode evaluationMode;
+
+  /// 为空时继承策略级 [KeepAlivePolicy.qualifyingActions]。
+  final Set<KeepAliveAction> qualifyingActions;
+
+  /// 自定义或付费规则的起算时刻。首次使用和套餐到期规则使用业务锚点。
+  final DateTime? anchorAt;
+
+  /// 用户手动确认完成的时刻，也可覆盖需要地区证据的自动规则。
+  final DateTime? completedAt;
+  final String? completionNote;
 
   factory KeepAliveConstraint.fromJson(Map<String, dynamic> value) {
     final regions = value['regions'] ?? const <dynamic>[];
+    final actions = value['qualifyingActions'] ?? const <dynamic>[];
     if (regions is! List) {
       throw const FormatException('constraint.regions 必须是数组');
     }
+    if (actions is! List) {
+      throw const FormatException('constraint.qualifyingActions 必须是数组');
+    }
     return KeepAliveConstraint(
+      id: _optionalString(value, 'id'),
       kind: _enumValue(
         KeepAliveConstraintKind.values,
         value['kind'],
@@ -76,29 +124,107 @@ class KeepAliveConstraint {
         for (var index = 0; index < regions.length; index++)
           _listString(regions[index], 'constraint.regions[$index]'),
       ],
+      evaluationMode: value['evaluationMode'] == null
+          ? null
+          : _enumValue(
+              KeepAliveConstraintEvaluationMode.values,
+              value['evaluationMode'],
+              'constraint.evaluationMode',
+            ),
+      qualifyingActions: {
+        for (var index = 0; index < actions.length; index++)
+          _enumValue(
+            KeepAliveAction.values,
+            actions[index],
+            'constraint.qualifyingActions[$index]',
+          ),
+      },
+      anchorAt: _optionalUtc(value, 'anchorAt'),
+      completedAt: _optionalUtc(value, 'completedAt'),
+      completionNote: _optionalString(value, 'completionNote'),
     );
   }
 
   Map<String, Object?> toJson() => {
+    'id': id,
     'kind': kind.name,
     'title': title,
     'details': details,
     if (withinDays != null) 'withinDays': withinDays,
     if (regions.isNotEmpty) 'regions': regions,
+    'evaluationMode': evaluationMode.name,
+    if (qualifyingActions.isNotEmpty)
+      'qualifyingActions': [
+        for (final action in qualifyingActions) action.name,
+      ],
+    if (anchorAt != null) 'anchorAt': anchorAt!.toIso8601String(),
+    if (completedAt != null) 'completedAt': completedAt!.toIso8601String(),
+    if (completionNote != null) 'completionNote': completionNote,
   };
+
+  KeepAliveConstraint copyWith({
+    String? id,
+    KeepAliveConstraintKind? kind,
+    String? title,
+    String? details,
+    Object? withinDays = _notSet,
+    List<String>? regions,
+    KeepAliveConstraintEvaluationMode? evaluationMode,
+    Set<KeepAliveAction>? qualifyingActions,
+    Object? anchorAt = _notSet,
+    Object? completedAt = _notSet,
+    Object? completionNote = _notSet,
+  }) => KeepAliveConstraint(
+    id: id ?? this.id,
+    kind: kind ?? this.kind,
+    title: title ?? this.title,
+    details: details ?? this.details,
+    withinDays: identical(withinDays, _notSet)
+        ? this.withinDays
+        : withinDays as int?,
+    regions: regions ?? this.regions,
+    evaluationMode: evaluationMode ?? this.evaluationMode,
+    qualifyingActions: qualifyingActions ?? this.qualifyingActions,
+    anchorAt: identical(anchorAt, _notSet)
+        ? this.anchorAt
+        : anchorAt as DateTime?,
+    completedAt: identical(completedAt, _notSet)
+        ? this.completedAt
+        : completedAt as DateTime?,
+    completionNote: identical(completionNote, _notSet)
+        ? this.completionNote
+        : completionNote as String?,
+  );
 
   @override
   bool operator ==(Object other) =>
       other is KeepAliveConstraint &&
+      other.id == id &&
       other.kind == kind &&
       other.title == title &&
       other.details == details &&
       other.withinDays == withinDays &&
-      _listEquals(other.regions, regions);
+      _listEquals(other.regions, regions) &&
+      other.evaluationMode == evaluationMode &&
+      _setEquals(other.qualifyingActions, qualifyingActions) &&
+      other.anchorAt == anchorAt &&
+      other.completedAt == completedAt &&
+      other.completionNote == completionNote;
 
   @override
-  int get hashCode =>
-      Object.hash(kind, title, details, withinDays, Object.hashAll(regions));
+  int get hashCode => Object.hash(
+    id,
+    kind,
+    title,
+    details,
+    withinDays,
+    Object.hashAll(regions),
+    evaluationMode,
+    Object.hashAllUnordered(qualifyingActions),
+    anchorAt,
+    completedAt,
+    completionNote,
+  );
 }
 
 /// 周期规则之外的可组合保号策略。
@@ -397,3 +523,23 @@ bool _listEquals<T>(List<T> a, List<T> b) {
 
 bool _setEquals<T>(Set<T> a, Set<T> b) =>
     a.length == b.length && a.containsAll(b);
+
+KeepAliveConstraintEvaluationMode _defaultConstraintEvaluationMode(
+  KeepAliveConstraintKind kind,
+) => switch (kind) {
+  KeepAliveConstraintKind.firstUse || KeepAliveConstraintKind.afterPlanExpiry =>
+    KeepAliveConstraintEvaluationMode.activity,
+  KeepAliveConstraintKind.paidRetention ||
+  KeepAliveConstraintKind.custom => KeepAliveConstraintEvaluationMode.manual,
+};
+
+String _legacyConstraintId(KeepAliveConstraintKind kind, String title) {
+  var hash = 0x811c9dc5;
+  for (final unit in '${kind.name}:$title'.codeUnits) {
+    hash ^= unit;
+    hash = (hash * 0x01000193) & 0xffffffff;
+  }
+  return 'rule-${kind.name}-${hash.toRadixString(16).padLeft(8, '0')}';
+}
+
+const _notSet = Object();

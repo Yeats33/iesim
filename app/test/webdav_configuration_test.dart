@@ -7,6 +7,7 @@ void main() {
       directoryUrl: 'https://dav.example.com/user/iesim',
       username: 'user',
       password: 'secret',
+      encryptionPassword: 'correct horse battery staple',
     );
     expect(
       configuration.directoryUri.toString(),
@@ -14,7 +15,7 @@ void main() {
     );
     expect(
       configuration.snapshotUri.toString(),
-      'https://dav.example.com/user/iesim/iesim-v1.json',
+      'https://dav.example.com/user/iesim/iesim-v1.encrypted.json',
     );
   });
 
@@ -24,6 +25,7 @@ void main() {
         directoryUrl: 'not-a-url',
         username: 'u',
         password: 'p',
+        encryptionPassword: 'correct horse battery staple',
       ).directoryUri,
       throwsFormatException,
     );
@@ -32,6 +34,7 @@ void main() {
         directoryUrl: 'https://dav.example.com/path?token=x',
         username: 'u',
         password: 'p',
+        encryptionPassword: 'correct horse battery staple',
       ).directoryUri,
       throwsFormatException,
     );
@@ -40,7 +43,20 @@ void main() {
         directoryUrl: 'http://dav.example.com/path',
         username: 'u',
         password: 'p',
+        encryptionPassword: 'correct horse battery staple',
       ).directoryUri,
+      throwsFormatException,
+    );
+  });
+
+  test('同步加密口令少于 12 个字符时拒绝生成快照地址', () {
+    expect(
+      () => const WebDavConfiguration(
+        directoryUrl: 'https://dav.example.com/path',
+        username: 'u',
+        password: 'p',
+        encryptionPassword: 'too-short',
+      ).snapshotUri,
       throwsFormatException,
     );
   });

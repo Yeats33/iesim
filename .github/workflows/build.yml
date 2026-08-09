@@ -1,0 +1,278 @@
+name: Build ieSIM
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  APP_DIR: app
+  PACKAGE_ID: im.ies.iesim
+
+jobs:
+  meta:
+    name: Read version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      version_clean: ${{ steps.version.outputs.version_clean }}
+      version_name: ${{ steps.version.outputs.version_name }}
+      build_number: ${{ steps.version.outputs.build_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        name: Read app/pubspec.yaml
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(awk '/^version:/ { print $2; exit }' "$APP_DIR/pubspec.yaml")"
+          if [[ -z "$version" ]]; then
+            echo "Cannot read version from $APP_DIR/pubspec.yaml" >&2
+            exit 1
+          fi
+          version_clean="${version//+/-}"
+          version_base="${version%%+*}"
+          version_name="${version_base%%-*}"
+          if [[ "$version" == *+* ]]; then
+            build_number="${version##*+}"
+          else
+            build_number="${GITHUB_RUN_NUMBER}"
+          fi
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "Tag $GITHUB_REF_NAME must match pubspec version v$version" >&2
+            exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "version_clean=$version_clean"
+            echo "version_name=$version_name"
+            echo "build_number=$build_number"
+          } >> "$GITHUB_OUTPUT"
+
+  quality:
+    name: Analyze and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Resolve dependencies
+        working-directory: app
+        run: flutter pub get
+      - name: Analyze core
+        working-directory: packages/iesim_core
+        run: dart analyze
+      - name: Test core
+        working-directory: packages/iesim_core
+        run: dart test
+      - name: Analyze app
+        working-directory: app
+        run: flutter analyze
+      - name: Test app
+        working-directory: app
+        run: flutter test
+
+  android:
+    name: Build Android APKs
+    needs: [meta, quality]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 37
+        shell: bash
+        run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Resolve dependencies
+        working-directory: app
+        run: flutter pub get
+      - name: Configure optional release signing
+        working-directory: app
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          configured=0
+          for value in \
+            "$ANDROID_KEYSTORE_BASE64" \
+            "$ANDROID_KEYSTORE_PASSWORD" \
+            "$ANDROID_KEY_ALIAS" \
+            "$ANDROID_KEY_PASSWORD"; do
+            [[ -n "$value" ]] && configured=$((configured + 1))
+          done
+          if [[ "$configured" -eq 0 ]]; then
+            echo 'No release keystore configured; APKs will use the development signature.'
+            exit 0
+          fi
+          if [[ "$configured" -ne 4 ]]; then
+            echo 'Android signing secrets are only partially configured.' >&2
+            exit 1
+          fi
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/release.jks
+          {
+            printf 'storeFile=release.jks\n'
+            printf 'storePassword=%s\n' "$ANDROID_KEYSTORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$ANDROID_KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
+          } > android/key.properties
+      - name: Build universal APK
+        working-directory: app
+        run: flutter build apk --release
+      - name: Build per-ABI APKs
+        working-directory: app
+        run: flutter build apk --release --split-per-abi
+      - name: Build Android App Bundle
+        working-directory: app
+        run: flutter build appbundle --release
+      - name: Stage Android artifacts
+        working-directory: app
+        env:
+          VERSION_CLEAN: ${{ needs.meta.outputs.version_clean }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/android
+          prefix="ieSIM-${VERSION_CLEAN}"
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            "dist/android/${prefix}-android-universal.apk"
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+            "dist/android/${prefix}-android-arm64-v8a.apk"
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
+            "dist/android/${prefix}-android-armeabi-v7a.apk"
+          cp build/app/outputs/flutter-apk/app-x86_64-release.apk \
+            "dist/android/${prefix}-android-x86_64.apk"
+          cp build/app/outputs/bundle/release/app-release.aab \
+            "dist/android/${prefix}-android.aab"
+          (cd dist/android && sha256sum ./* > SHA256SUMS-android.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ needs.meta.outputs.version_clean }}
+          path: app/dist/android/*
+          if-no-files-found: error
+          retention-days: 14
+
+  ios:
+    name: Build iOS unsigned IPA
+    needs: [meta, quality]
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Resolve dependencies
+        working-directory: app
+        run: flutter pub get
+      - name: Build iOS app without code signing
+        working-directory: app
+        env:
+          IOS_VERSION: ${{ needs.meta.outputs.version_name }}
+          BUILD_NUMBER: ${{ needs.meta.outputs.build_number }}
+        run: |
+          flutter build ios --release --no-codesign \
+            --build-name "$IOS_VERSION" \
+            --build-number "$BUILD_NUMBER"
+      - name: Package unsigned IPA
+        working-directory: app
+        env:
+          VERSION_CLEAN: ${{ needs.meta.outputs.version_clean }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="$(find build/ios/iphoneos -maxdepth 1 -name '*.app' -print -quit)"
+          if [[ -z "$app_path" ]]; then
+            echo 'No iOS .app bundle was produced.' >&2
+            exit 1
+          fi
+          stage="$RUNNER_TEMP/iesim-ipa"
+          mkdir -p "$stage/Payload" dist/ios
+          cp -R "$app_path" "$stage/Payload/ieSIM.app"
+          output="ieSIM-${VERSION_CLEAN}-ios-unsigned.ipa"
+          (cd "$stage" && /usr/bin/zip -qry "$GITHUB_WORKSPACE/app/dist/ios/$output" Payload)
+          (cd dist/ios && shasum -a 256 ./*.ipa > SHA256SUMS-ios.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-${{ needs.meta.outputs.version_clean }}
+          path: app/dist/ios/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Create GitHub Release
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    needs: [meta, android, ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.meta.outputs.version }}
+          VERSION_CLEAN: ${{ needs.meta.outputs.version_clean }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          notes="$RUNNER_TEMP/release-notes.md"
+          cat > "$notes" <<EOF
+          ieSIM $tag automated builds.
+
+          | Artifact | Description |
+          | --- | --- |
+          | ieSIM-${VERSION_CLEAN}-android-universal.apk | Universal Android APK |
+          | ieSIM-${VERSION_CLEAN}-android-arm64-v8a.apk | 64-bit ARM Android APK |
+          | ieSIM-${VERSION_CLEAN}-android-armeabi-v7a.apk | 32-bit ARM Android APK |
+          | ieSIM-${VERSION_CLEAN}-android-x86_64.apk | x86_64 Android APK |
+          | ieSIM-${VERSION_CLEAN}-android.aab | Android App Bundle |
+          | ieSIM-${VERSION_CLEAN}-ios-unsigned.ipa | Unsigned iOS IPA; sign before installation |
+          EOF
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" \
+              --title "ieSIM $tag" --notes-file "$notes"
+          else
+            prerelease=()
+            [[ "$VERSION" == *-* ]] && prerelease+=(--prerelease)
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
+              --title "ieSIM $tag" --notes-file "$notes" "${prerelease[@]}"
+          fi
+          mapfile -t files < <(find dist -type f -print | sort)
+          gh release upload "$tag" "${files[@]}" \
+            --repo "$GITHUB_REPOSITORY" --clobber

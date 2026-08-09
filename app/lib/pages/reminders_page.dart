@@ -45,6 +45,25 @@ class RemindersPage extends StatelessWidget {
           ),
         );
       }
+      final keepAliveEvaluation = controller.keepAliveEvaluationOf(
+        subscription,
+      );
+      for (final rule in keepAliveEvaluation.rules) {
+        if (rule.id == 'cycle' || rule.deadlineUtc == null) continue;
+        if (rule.state == KeepAliveRuleState.satisfied ||
+            rule.state == KeepAliveRuleState.notApplicable) {
+          continue;
+        }
+        events.add(
+          _ReminderEvent(
+            subscription: subscription,
+            type: _ReminderType.keepAliveConstraint,
+            date: rule.deadlineUtc!,
+            status: controller.statusOf(subscription),
+            rule: rule,
+          ),
+        );
+      }
       if (subscription.plan.expiryDate != null) {
         events.add(
           _ReminderEvent(
@@ -71,7 +90,11 @@ class RemindersPage extends StatelessWidget {
         .where(
           (item) =>
               item.lifecycle.stage == ProfileStage.active &&
-              controller.statusOf(item) is Unknown,
+              (controller.statusOf(item) is Unknown ||
+                  controller
+                      .keepAliveEvaluationOf(item)
+                      .rules
+                      .any((rule) => rule.state == KeepAliveRuleState.unknown)),
         )
         .toList(growable: false);
 
@@ -213,7 +236,13 @@ class RemindersPage extends StatelessWidget {
   }
 }
 
-enum _ReminderType { keepAlive, planExpiry, activationDeadline, profileExpiry }
+enum _ReminderType {
+  keepAlive,
+  keepAliveConstraint,
+  planExpiry,
+  activationDeadline,
+  profileExpiry,
+}
 
 class _ReminderEvent {
   const _ReminderEvent({
@@ -221,12 +250,14 @@ class _ReminderEvent {
     required this.type,
     required this.date,
     required this.status,
+    this.rule,
   });
 
   final Subscription subscription;
   final _ReminderType type;
   final DateTime date;
   final KeepAliveStatus status;
+  final KeepAliveRuleEvaluation? rule;
 }
 
 class _ReminderSummary extends StatelessWidget {
@@ -238,6 +269,11 @@ class _ReminderSummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final urgent = events.where((event) {
+      if (event.type == _ReminderType.keepAliveConstraint) {
+        return event.rule?.state == KeepAliveRuleState.dueSoon ||
+            event.rule?.state == KeepAliveRuleState.overdue ||
+            event.rule?.state == KeepAliveRuleState.needsConfirmation;
+      }
       if (event.type != _ReminderType.keepAlive) return false;
       return event.status is DueSoon || event.status is Overdue;
     }).length;
@@ -307,21 +343,37 @@ class _TimelineEvent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final isKeepAlive = event.type == _ReminderType.keepAlive;
+    final isKeepAlive =
+        event.type == _ReminderType.keepAlive ||
+        event.type == _ReminderType.keepAliveConstraint;
     final label = switch (event.type) {
       _ReminderType.keepAlive => '保号截止',
+      _ReminderType.keepAliveConstraint => event.rule?.title ?? '附加保号条件',
       _ReminderType.planExpiry => '套餐到期',
       _ReminderType.activationDeadline => 'Profile 激活期限',
       _ReminderType.profileExpiry => 'Profile 服务到期',
     };
     final icon = switch (event.type) {
       _ReminderType.keepAlive => Icons.shield_outlined,
+      _ReminderType.keepAliveConstraint => Icons.rule_folder_outlined,
       _ReminderType.planExpiry => Icons.layers_outlined,
       _ReminderType.activationDeadline => Icons.bolt_outlined,
       _ReminderType.profileExpiry => Icons.event_busy_outlined,
     };
     final info = describeStatus(event.status);
-    final statusColor = statusColors(context, info.tone);
+    final ruleTone = switch (event.rule?.state) {
+      KeepAliveRuleState.overdue => StatusTone.danger,
+      KeepAliveRuleState.dueSoon ||
+      KeepAliveRuleState.needsConfirmation => StatusTone.warning,
+      KeepAliveRuleState.safe ||
+      KeepAliveRuleState.satisfied => StatusTone.safe,
+      KeepAliveRuleState.unknown => StatusTone.neutral,
+      _ => StatusTone.info,
+    };
+    final statusColor = statusColors(
+      context,
+      event.rule == null ? info.tone : ruleTone,
+    );
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -412,8 +464,10 @@ class _TimelineEvent extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 10),
-                      if (isKeepAlive)
+                      if (event.type == _ReminderType.keepAlive)
                         StatusBadge(status: event.status, compact: true)
+                      else if (event.type == _ReminderType.keepAliveConstraint)
+                        _RuleStateBadge(rule: event.rule!)
                       else
                         Icon(
                           Icons.chevron_right_rounded,
@@ -426,6 +480,42 @@ class _TimelineEvent extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _RuleStateBadge extends StatelessWidget {
+  const _RuleStateBadge({required this.rule});
+
+  final KeepAliveRuleEvaluation rule;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, tone) = switch (rule.state) {
+      KeepAliveRuleState.overdue => ('超期', StatusTone.danger),
+      KeepAliveRuleState.dueSoon => ('临近', StatusTone.warning),
+      KeepAliveRuleState.needsConfirmation => ('待确认', StatusTone.warning),
+      KeepAliveRuleState.safe => ('待执行', StatusTone.safe),
+      KeepAliveRuleState.pending => ('未开始', StatusTone.info),
+      KeepAliveRuleState.unknown => ('资料不足', StatusTone.neutral),
+      KeepAliveRuleState.satisfied => ('已完成', StatusTone.safe),
+      KeepAliveRuleState.notApplicable => ('不适用', StatusTone.neutral),
+    };
+    final colors = statusColors(context, tone);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: colors.background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: colors.foreground,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }

@@ -2,11 +2,59 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:iesim/data/app_controller.dart';
+import 'package:iesim/services/credential_vault.dart';
 import 'package:iesim/services/reminder_notifications.dart';
 import 'package:iesim/services/webdav_service.dart';
 import 'package:iesim_core/iesim_core.dart';
 
 void main() {
+  test('Nekoko Tag 默认隐藏且展示选择会持久化', () async {
+    final persisted = <bool>[];
+    final controller = AppController.inMemory(
+      persistShowNekokoTags: (value) async => persisted.add(value),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize(defaultTimeZoneId: 'UTC');
+
+    expect(controller.showNekokoTags, isFalse);
+    expect(await controller.setShowNekokoTags(true), isNull);
+    expect(controller.showNekokoTags, isTrue);
+    expect(persisted, [true]);
+  });
+
+  test('Profile 保存和 reload 都通过凭据保险库还原 LPA 信息', () async {
+    final vault = MemoryActivationCredentialVault();
+    final controller = AppController.inMemory(credentialVault: vault);
+    addTearDown(controller.dispose);
+    await controller.initialize(defaultTimeZoneId: 'UTC');
+    final now = DateTime.now().toUtc();
+    final activation = LpaActivation(
+      smdpAddress: 'rsp.private.example',
+      matchingId: 'MATCHING-ID-SECRET',
+      confirmationCode: '123456',
+    );
+    final subscription = Subscription(
+      id: 'vault-profile',
+      number: const PhoneNumber.unknown(),
+      activation: activation,
+      plan: Plan(),
+      keepAlive: KeepAlive.notRequired(),
+      timeZoneId: 'UTC',
+      createdAt: now,
+      updatedAt: now,
+    );
+
+    expect(await controller.saveSubscription(subscription), isNull);
+    expect(controller.subscriptions.single.activation, activation);
+    expect((await vault.read(subscription.id))?.activation, activation);
+
+    await controller.reload();
+    expect(controller.subscriptions.single.activation, activation);
+
+    expect(await controller.clearDeveloperData(), isNull);
+    expect(await vault.readAll(), isEmpty);
+  });
+
   test('SimHub 报告确认后写入并可再次导出', () async {
     final controller = AppController.inMemory();
     addTearDown(controller.dispose);
@@ -296,6 +344,7 @@ void main() {
         directoryUrl: 'https://dav.example.test/iesim/',
         username: 'tester',
         password: 'secret',
+        encryptionPassword: 'correct horse battery staple',
       ),
     );
     final controller = AppController.inMemory(webDavGateway: webDav);
@@ -466,6 +515,52 @@ void main() {
       const Money(minorUnits: 725, currencyCode: 'GBP'),
     );
     expect(activity.note, '购买套餐');
+  });
+
+  test('首页派生列表和按 Profile 活动查询复用 reload 后的缓存', () async {
+    final controller = AppController.inMemory(museumAutoArchiveDays: null);
+    addTearDown(controller.dispose);
+    await controller.initialize(defaultTimeZoneId: 'UTC');
+    final now = DateTime.now().toUtc();
+    final subscription = Subscription(
+      id: 'cached-profile',
+      number: const PhoneNumber.unknown(),
+      plan: Plan(),
+      keepAlive: KeepAlive.notRequired(),
+      timeZoneId: 'UTC',
+      createdAt: now,
+      updatedAt: now,
+    );
+    expect(await controller.saveSubscription(subscription), isNull);
+    expect(
+      await controller.recordActivity(
+        subscription: controller.subscriptions.single,
+        type: ActivityType.mobileData,
+        occurredAt: now.subtract(const Duration(days: 1)),
+      ),
+      isNull,
+    );
+    expect(
+      await controller.recordActivity(
+        subscription: controller.subscriptions.single,
+        type: ActivityType.call,
+        occurredAt: now,
+      ),
+      isNull,
+    );
+
+    expect(identical(controller.subscriptions, controller.subscriptions), true);
+    expect(identical(controller.activities, controller.activities), true);
+    expect(identical(controller.homeActions, controller.homeActions), true);
+    final activities = controller.activitiesFor(subscription.id);
+    expect(
+      identical(activities, controller.activitiesFor(subscription.id)),
+      true,
+    );
+    expect(activities.map((item) => item.type), [
+      ActivityType.call,
+      ActivityType.mobileData,
+    ]);
   });
 }
 

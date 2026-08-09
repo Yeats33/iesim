@@ -3,6 +3,7 @@ import 'package:iesim_core/iesim_core.dart';
 
 import '../util/formatters.dart';
 import 'activation_qr_view.dart';
+import 'operator_identity_line.dart';
 import 'status_badge.dart';
 
 class SubscriptionCard extends StatefulWidget {
@@ -11,11 +12,13 @@ class SubscriptionCard extends StatefulWidget {
     required this.subscription,
     required this.status,
     required this.onTap,
+    this.nekokoTagsRaw,
   });
 
   final Subscription subscription;
   final KeepAliveStatus status;
   final VoidCallback onTap;
+  final String? nekokoTagsRaw;
 
   @override
   State<SubscriptionCard> createState() => _SubscriptionCardState();
@@ -73,26 +76,13 @@ class _SubscriptionCardState extends State<SubscriptionCard> {
                             children: [
                               Row(
                                 children: [
-                                  if (subscription.appearance.flag != null) ...[
-                                    Text(
-                                      subscription.appearance.flag!,
-                                      style: const TextStyle(fontSize: 20),
-                                    ),
-                                    const SizedBox(width: 8),
-                                  ],
-                                  Flexible(
-                                    child: Text(
-                                      subscription.operator
-                                                  ?.trim()
-                                                  .isNotEmpty ==
-                                              true
-                                          ? subscription.operator!
-                                          : '未填写运营商',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(
+                                  Expanded(
+                                    child: OperatorIdentityLine(
+                                      subscription: subscription,
+                                      textStyle: Theme.of(
                                         context,
                                       ).textTheme.titleMedium,
+                                      iconSize: 28,
                                     ),
                                   ),
                                   if (subscription.details.isDormant) ...[
@@ -276,7 +266,10 @@ class _SubscriptionCardState extends State<SubscriptionCard> {
                     ),
                     if (_expanded) ...[
                       const SizedBox(height: 10),
-                      _ProfileCardExtraInfo(subscription: subscription),
+                      _ProfileCardExtraInfo(
+                        subscription: subscription,
+                        nekokoTagsRaw: widget.nekokoTagsRaw,
+                      ),
                     ],
                   ],
                 ),
@@ -314,14 +307,16 @@ class _SubscriptionCardState extends State<SubscriptionCard> {
 }
 
 class _ProfileCardExtraInfo extends StatelessWidget {
-  const _ProfileCardExtraInfo({required this.subscription});
+  const _ProfileCardExtraInfo({required this.subscription, this.nekokoTagsRaw});
 
   final Subscription subscription;
+  final String? nekokoTagsRaw;
 
   @override
   Widget build(BuildContext context) {
     final details = subscription.details;
     final activation = subscription.activation;
+    final nekokoTags = _formatNekokoTags(nekokoTagsRaw);
     final rows = <({String label, String value})>[
       if (!subscription.number.isUnknown)
         (label: '手机号', value: displayPhone(subscription.number)),
@@ -367,6 +362,25 @@ class _ProfileCardExtraInfo extends StatelessWidget {
             Divider(color: scheme.outlineVariant),
             const SizedBox(height: 4),
           ],
+          if (nekokoTags.isNotEmpty) ...[
+            Text('Nekoko Tag', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 7,
+              runSpacing: 7,
+              children: [for (final tag in nekokoTags) Chip(label: Text(tag))],
+            ),
+            const SizedBox(height: 8),
+            SelectableText(
+              nekokoTagsRaw!,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 12),
+            Divider(color: scheme.outlineVariant),
+            const SizedBox(height: 4),
+          ],
           for (var index = 0; index < rows.length; index++) ...[
             _ExpandedInfoRow(
               label: rows[index].label,
@@ -379,6 +393,21 @@ class _ProfileCardExtraInfo extends StatelessWidget {
       ),
     );
   }
+}
+
+List<String> _formatNekokoTags(String? source) {
+  if (source == null || source.trim().isEmpty) return const [];
+  return [
+    for (final tag in NekokoTagCodec.decode(source).tags)
+      switch (tag) {
+        NekokoTextTag(value: final value) => value,
+        NekokoDateTag(date: final date, note: final note) =>
+          '${date.year.toString().padLeft(4, '0')}-'
+              '${date.month.toString().padLeft(2, '0')}-'
+              '${date.day.toString().padLeft(2, '0')}'
+              '${note == null ? '' : ' · $note'}',
+      },
+  ];
 }
 
 class _ExpandedInfoRow extends StatelessWidget {

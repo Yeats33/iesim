@@ -155,6 +155,12 @@ ON CONFLICT(id) DO UPDATE SET
       );
       if (placementError != null) throw _AssetConstraint(placementError);
     }
+    if (card is PhysicalSimCard &&
+        _db.select('SELECT id FROM eids WHERE card_id = ? LIMIT 1', [
+          card.id,
+        ]).isNotEmpty) {
+      throw const _AssetConstraint('包含 EID 的 eUICC 卡片不能改为普通实体 SIM');
+    }
     _db.execute(
       '''INSERT INTO cards (
   id, name, kind, physical_iccid, note, preset_id, embedded_device_id,
@@ -183,6 +189,13 @@ ON CONFLICT(id) DO UPDATE SET
   });
 
   Result<void> upsertEid(Euicc eid) => _guard(() {
+    final cardRows = _db.select('SELECT kind FROM cards WHERE id = ?', [
+      eid.cardId,
+    ]);
+    if (cardRows.isEmpty) throw const _AssetConstraint('EID 所属卡片不存在');
+    if (cardRows.single['kind'] == SimCardKind.physicalSim.name) {
+      throw const _AssetConstraint('普通实体 SIM 不包含 EID');
+    }
     _db.execute(
       '''INSERT INTO eids (id, card_id, value, label, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)
@@ -205,14 +218,15 @@ ON CONFLICT(id) DO UPDATE SET
   Result<void> upsertProfile(EsimProfile profile) => _guard(() {
     _db.execute(
       '''INSERT INTO profiles (
-  id, eid_id, iccid, operator_name, nickname, subscription_id, is_pinned,
-  created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  id, eid_id, iccid, operator_name, nickname, nekoko_tags_raw,
+  subscription_id, is_pinned, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   eid_id = excluded.eid_id,
   iccid = excluded.iccid,
   operator_name = excluded.operator_name,
   nickname = excluded.nickname,
+  nekoko_tags_raw = excluded.nekoko_tags_raw,
   subscription_id = excluded.subscription_id,
   is_pinned = excluded.is_pinned,
   updated_at = excluded.updated_at''',
@@ -222,6 +236,7 @@ ON CONFLICT(id) DO UPDATE SET
         _nullable(profile.iccid),
         _nullable(profile.operatorName),
         _nullable(profile.nickname),
+        _nullable(profile.nekokoTagsRaw),
         profile.subscriptionId,
         profile.isPinned ? 1 : 0,
         _iso(profile.createdAt),
@@ -769,7 +784,7 @@ SimCard _cardFromRow(Row row) {
       name: common.name,
       note: common.note,
       presetId: common.presetId,
-      physicalIccid: row['physical_iccid'] as String,
+      physicalIccid: row['physical_iccid'] as String?,
       createdAt: common.createdAt,
       updatedAt: common.updatedAt,
     ),
@@ -809,6 +824,7 @@ EsimProfile _profileFromRow(Row row) => EsimProfile(
   iccid: row['iccid'] as String?,
   operatorName: row['operator_name'] as String?,
   nickname: row['nickname'] as String?,
+  nekokoTagsRaw: row['nekoko_tags_raw'] as String?,
   subscriptionId: row['subscription_id'] as String?,
   isPinned: row['is_pinned'] == 1,
   createdAt: DateTime.parse(row['created_at'] as String).toUtc(),

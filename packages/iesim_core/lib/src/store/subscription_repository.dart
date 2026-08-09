@@ -9,7 +9,6 @@ import '../model/plan.dart';
 import '../model/profile_lifecycle.dart';
 import '../model/subscription.dart';
 import '../model/subscription_details.dart';
-import '../interop/lpa_activation.dart';
 import '../result.dart';
 import '../value/money.dart';
 import '../value/phone_number.dart';
@@ -41,7 +40,6 @@ class SubscriptionRepository {
   auto_top_up_enabled, top_up_cycle_unit, renewal_interval_value, renewal_unit,
   transaction_notes, carrier_app_name, carrier_app_store_url,
   carrier_app_icon_url, keep_alive_mode_raw, order_index, is_dormant, is_pinned,
-  smdp_address, activation_code, activation_extra, confirmation_code,
   plan_name, plan_cycle_minor, plan_cycle_currency, plan_cycle_days,
   plan_start, plan_expiry, plan_is_long_term,
   keepalive_required, keepalive_cycle_days, keepalive_last_activity_at,
@@ -64,7 +62,6 @@ class SubscriptionRepository {
   ?, ?, ?, ?,
   ?, ?, ?,
   ?, ?, ?, ?, ?,
-  ?, ?, ?, ?,
   ?, ?, ?, ?,
   ?, ?, ?,
   ?, ?, ?,
@@ -115,10 +112,6 @@ ON CONFLICT(id) DO UPDATE SET
   order_index = excluded.order_index,
   is_dormant = excluded.is_dormant,
   is_pinned = excluded.is_pinned,
-  smdp_address = excluded.smdp_address,
-  activation_code = excluded.activation_code,
-  activation_extra = excluded.activation_extra,
-  confirmation_code = excluded.confirmation_code,
   plan_name = excluded.plan_name,
   plan_cycle_minor = excluded.plan_cycle_minor,
   plan_cycle_currency = excluded.plan_cycle_currency,
@@ -184,10 +177,6 @@ ON CONFLICT(id) DO UPDATE SET
           s.details.orderIndex,
           s.details.isDormant ? 1 : 0,
           s.details.isPinned ? 1 : 0,
-          s.activation?.smdpAddress,
-          s.activation?.matchingId,
-          s.activation?.extra,
-          s.activation?.confirmationCode,
           s.plan.name,
           s.plan.cyclePrice?.minorUnits,
           s.plan.cyclePrice?.currencyCode,
@@ -282,14 +271,7 @@ ON CONFLICT(id) DO UPDATE SET
                 row['profile_archive_reason'] as String,
               ),
       ),
-      activation: row['smdp_address'] == null || row['activation_code'] == null
-          ? null
-          : LpaActivation(
-              smdpAddress: row['smdp_address'] as String,
-              matchingId: row['activation_code'] as String,
-              extra: row['activation_extra'] as String?,
-              confirmationCode: row['confirmation_code'] as String?,
-            ),
+      activation: null,
       plan: Plan(
         name: row['plan_name'] as String?,
         cyclePrice: cycleMinor == null

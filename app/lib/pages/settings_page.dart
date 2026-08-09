@@ -103,10 +103,26 @@ class SettingsPage extends StatelessWidget {
                           onTap: () => _open(context, const DataExchangePage()),
                         ),
                         const Divider(indent: 62),
+                        SwitchListTile(
+                          secondary: const Icon(Icons.visibility_outlined),
+                          title: const Text('显示 Nekoko Tag'),
+                          subtitle: const Text('默认隐藏外部元数据；开启后在 Profile 中显示'),
+                          value: controller.showNekokoTags,
+                          onChanged: (value) async {
+                            final error = await controller.setShowNekokoTags(
+                              value,
+                            );
+                            if (!context.mounted || error == null) return;
+                            ScaffoldMessenger.of(
+                              context,
+                            ).showSnackBar(SnackBar(content: Text(error)));
+                          },
+                        ),
+                        const Divider(indent: 62),
                         _SettingsTile(
                           icon: Icons.label_outline_rounded,
                           title: 'Nekoko 标签工具',
-                          subtitle: '按 ICCID 双向转换 Profile 标签',
+                          subtitle: '保存原始 Tag，并提取到 ieSIM 原生字段',
                           onTap: () => _open(context, const NekokoTagsPage()),
                         ),
                       ],
@@ -192,6 +208,10 @@ class SettingsPage extends StatelessWidget {
                             children: const [
                               Text(
                                 '${AppBrand.name} 将订阅资料保存在设备本地；启用 WebDAV 后，数据只会同步到用户指定的服务。',
+                              ),
+                              SizedBox(height: 10),
+                              Text(
+                                '运营商识别按 MCC 下载 operator-icons 公共目录；MNC、GID、Profile 名和服务商名只在本机匹配，Logo 下载后保存在本地缓存。',
                               ),
                             ],
                           ),

@@ -37,6 +37,12 @@ void main() {
 
     await tester.pumpWidget(IesimApp(controller: controller));
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('普通 Profile'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
 
     expect(find.byTooltip('已置顶'), findsOneWidget);
     expect(

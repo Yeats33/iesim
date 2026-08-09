@@ -51,6 +51,8 @@ void main() {
     expect(providerA.sizeForEum('89049032'), 41175);
     expect(providerA.minimumSizeBytes, 39008);
     expect(providerA.maximumSizeBytes, 41175);
+    expect(providerA.mcc, '001');
+    expect(providerA.mnc, '01');
   });
 
   test('唯一服务商可作为自动填充建议', () {

@@ -5,6 +5,7 @@ import '../app/app_scope.dart';
 import '../util/formatters.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/section_card.dart';
+import 'subscription_form_page.dart';
 
 class BalanceManagementPage extends StatelessWidget {
   const BalanceManagementPage({super.key, required this.subscriptionId});
@@ -29,9 +30,13 @@ class BalanceManagementPage extends StatelessWidget {
         .where((record) => record.type == ActivityType.balanceChange)
         .toList(growable: false);
     final balance = subscription.details.currentBalance;
+    final value = const SubscriptionValueCalculator().evaluate(
+      subscription,
+      nowUtc: DateTime.now().toUtc(),
+    );
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('余额管理')),
+      appBar: AppBar(title: const Text('余额与价值')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openEditor(context, subscription),
         icon: const Icon(Icons.add_rounded),
@@ -61,25 +66,53 @@ class BalanceManagementPage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 12),
-                Text(
-                  balance == null ? '尚未记录' : formatMoney(balance),
-                  style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: scheme.onPrimaryContainer,
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    _heroValue(value),
+                    style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: scheme.onPrimaryContainer,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  balance == null
-                      ? '设置第一次余额后，之后每次增减都会留下流水。'
-                      : '当前账面余额 · ${balance.currencyCode}',
+                  value.hasMixedCurrencies
+                      ? '余额与套餐币种不同，已分开统计，不做自动换汇。'
+                      : value.combinedValue == null
+                      ? '补充余额或套餐资料后即可计算当前价值。'
+                      : '当前可计价值 · 余额 + 套餐剩余价值',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: scheme.onPrimaryContainer.withValues(alpha: .76),
                   ),
                 ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _HeroMetric(
+                        label: '账面余额',
+                        value: balance == null ? '未记录' : formatMoney(balance),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _HeroMetric(
+                        label: '套餐残值',
+                        value: value.plan.remainingValue == null
+                            ? '待补充'
+                            : formatMoney(value.plan.remainingValue!),
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
+          const SizedBox(height: 16),
+          _PlanValueCard(subscription: subscription, estimate: value.plan),
           const SizedBox(height: 16),
           SectionCard(
             title: '余额流水',
@@ -106,6 +139,13 @@ class BalanceManagementPage extends StatelessWidget {
     );
   }
 
+  static String _heroValue(SubscriptionValueBreakdown value) {
+    final combined = value.combinedValue;
+    if (combined != null) return formatMoney(combined);
+    if (value.hasMixedCurrencies) return '分币种统计';
+    return '尚未估值';
+  }
+
   static Future<void> _openEditor(
     BuildContext context,
     Subscription subscription,
@@ -119,6 +159,155 @@ class BalanceManagementPage extends StatelessWidget {
       child: _BalanceEditorSheet(subscription: subscription),
     ),
   );
+}
+
+class _HeroMetric extends StatelessWidget {
+  const _HeroMetric({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = Theme.of(context).colorScheme.onPrimaryContainer;
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: foreground.withValues(alpha: .08),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: foreground.withValues(alpha: .72),
+            ),
+          ),
+          const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(color: foreground),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlanValueCard extends StatelessWidget {
+  const _PlanValueCard({required this.subscription, required this.estimate});
+
+  final Subscription subscription;
+  final PlanValueEstimate estimate;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SectionCard(
+      title: '套餐剩余价值',
+      subtitle: '按时间线性摊销的账面估算，不包含实时汇率或转售折价',
+      trailing: TextButton.icon(
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => SubscriptionFormPage(subscription: subscription),
+          ),
+        ),
+        icon: const Icon(Icons.edit_outlined, size: 18),
+        label: const Text('编辑套餐'),
+      ),
+      child: estimate.isAvailable
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        formatMoney(estimate.remainingValue!),
+                        style: Theme.of(context).textTheme.headlineMedium,
+                      ),
+                    ),
+                    Text(
+                      '剩余 ${estimate.remainingPercent}%',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(99),
+                  child: LinearProgressIndicator(
+                    minHeight: 9,
+                    value: estimate.remainingRatio,
+                    backgroundColor: scheme.surfaceContainerHighest,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  _periodDescription(subscription, estimate),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  estimate.method == PlanValueMethod.billingCycle
+                      ? '计算：周期价格 × 当前计费周期剩余时间比例'
+                      : '计算：套餐价格 × 完整有效期剩余时间比例',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            )
+          : Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(
+                _unavailableMessage(estimate.status),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+    );
+  }
+
+  static String _periodDescription(
+    Subscription subscription,
+    PlanValueEstimate estimate,
+  ) {
+    final start = estimate.periodStartUtc;
+    final end = estimate.periodEndUtc;
+    if (start == null || end == null) return '当前估值周期未知';
+    return '估值周期 ${formatZonedDate(start, subscription.timeZoneId)} — '
+        '${formatZonedDate(end, subscription.timeZoneId)}';
+  }
+
+  static String _unavailableMessage(PlanValueStatus status) => switch (status) {
+    PlanValueStatus.missingPrice => '尚未填写套餐价格。填写价格和周期后即可计算剩余价值。',
+    PlanValueStatus.missingPeriod => '已有套餐价格，还需要计费周期；或同时填写套餐开始与到期日期。',
+    PlanValueStatus.invalidPrice => '套餐价格不能为负数，请检查套餐资料。',
+    PlanValueStatus.invalidPeriod => '套餐起止时间无效，请检查开始、到期与周期资料。',
+    PlanValueStatus.available => '',
+  };
 }
 
 class _BalanceEntryTile extends StatelessWidget {

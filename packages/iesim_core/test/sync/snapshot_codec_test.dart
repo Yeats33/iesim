@@ -40,6 +40,12 @@ void main() {
             createdAt: now,
             updatedAt: now,
           ),
+          PhysicalSimCard(
+            id: 'physical-without-iccid',
+            name: '普通实体 SIM',
+            createdAt: now,
+            updatedAt: now,
+          ),
         ],
         slots: [
           SimSlot(
@@ -67,6 +73,8 @@ void main() {
             id: 'p1',
             eidId: 'e1',
             iccid: '8986000000000000001',
+            nickname: '旅行 Profile',
+            nekokoTagsRaw: 't:旅行\x0Ad:260901:套餐到期',
             subscriptionId: 's1',
             isPinned: true,
             createdAt: now,
@@ -92,10 +100,18 @@ void main() {
       ],
     );
     const codec = SyncSnapshotCodec();
-    final decoded = codec.decode(codec.encode(snapshot));
+    final encoded = codec.encode(snapshot);
+    expect(encoded, isNot(contains('rsp.example.test')));
+    expect(encoded, isNot(contains('MATCHING-ID-SECRET')));
+    expect(encoded, isNot(contains('CONFIRMATION-SECRET')));
+    final decoded = codec.decode(encoded);
     expect(decoded, isA<Ok<SyncSnapshot>>());
     final value = (decoded as Ok<SyncSnapshot>).value;
-    expect(value.subscriptions.single, snapshot.subscriptions.single);
+    expect(
+      value.subscriptions.single,
+      snapshot.subscriptions.single.copyWith(activation: null),
+    );
+    expect(value.subscriptions.single.activation, isNull);
     expect(value.activityRecords.single, snapshot.activityRecords.single);
     expect(value.assets.devices, snapshot.assets.devices);
     expect(value.assets.slots, snapshot.assets.slots);
@@ -177,6 +193,11 @@ Subscription _subscription(String id, DateTime updatedAt) => Subscription(
     activatedAt: DateTime.utc(2026, 1, 2),
     archivedAt: DateTime.utc(2026, 8, 1),
     archiveReason: ProfileArchiveReason.expired,
+  ),
+  activation: LpaActivation(
+    smdpAddress: 'rsp.example.test',
+    matchingId: 'MATCHING-ID-SECRET',
+    confirmationCode: 'CONFIRMATION-SECRET',
   ),
   plan: Plan(
     name: '套餐',

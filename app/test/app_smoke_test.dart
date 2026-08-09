@@ -89,6 +89,7 @@ void main() {
     await tester.tap(find.widgetWithText(TextButton, '保存'));
     await tester.pumpAndSettle();
 
+    await _scrollHomeTo(tester, find.text('Data Only'));
     expect(find.text('Data Only'), findsOneWidget);
     expect(find.text('未分配号码'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -309,6 +310,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('已激活 Profile'), findsOneWidget);
+    await _scrollHomeTo(tester, find.text('CTExcel eSIM'));
     expect(find.text('CTExcel eSIM'), findsOneWidget);
     expect(find.text('Profile'), findsOneWidget);
     expect(find.text('+44_7726_751499'), findsNothing);
@@ -360,6 +362,7 @@ void main() {
 
     await tester.pumpWidget(IesimApp(controller: controller));
     await tester.pumpAndSettle();
+    await _scrollHomeTo(tester, find.text('欧洲旅行 Profile'));
     expect(find.text('欧洲旅行 Profile'), findsOneWidget);
     expect(find.text('未分配号码'), findsNothing);
 
@@ -420,8 +423,11 @@ void main() {
     expect(find.text('未激活 1'), findsOneWidget);
     expect(find.text('过期博物馆 1'), findsOneWidget);
 
+    await tester.ensureVisible(find.text('未激活 1'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('未激活 1'));
     await tester.pumpAndSettle();
+    await _scrollHomeTo(tester, find.text('旅行数据 eSIM（测试）'));
     expect(find.text('旅行数据 eSIM（测试）'), findsOneWidget);
     await tester.tap(find.text('旅行数据 eSIM（测试）'));
     await tester.pumpAndSettle();
@@ -748,6 +754,15 @@ void main() {
     expect(controller.assets.cards.single.note, '可编辑备注');
     expect(tester.takeException(), isNull);
   });
+}
+
+Future<void> _scrollHomeTo(WidgetTester tester, Finder target) async {
+  await tester.scrollUntilVisible(
+    target,
+    300,
+    scrollable: find.byType(Scrollable).first,
+  );
+  await tester.pumpAndSettle();
 }
 
 class _FixedCarrierNetworkCatalogService extends CarrierNetworkCatalogService {

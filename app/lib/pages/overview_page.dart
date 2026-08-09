@@ -9,6 +9,7 @@ import '../widgets/profile_card.dart';
 import '../widgets/subscription_card.dart';
 import '../widgets/home_action_center_panel.dart';
 import '../widgets/overview_header.dart';
+import '../widgets/portfolio_value_dashboard.dart';
 import 'data_exchange_page.dart';
 import 'reminders_page.dart';
 import 'subscription_detail_page.dart';
@@ -149,6 +150,10 @@ class _OverviewPageState extends State<OverviewPage> {
         }).length +
         entries.where((item) => item.subscription == null).length;
     final unknown = missingDataProfileIds.length;
+    final valueSummary = const SubscriptionValueCalculator().summarize(
+      subscriptions,
+      nowUtc: DateTime.now().toUtc(),
+    );
 
     return Scaffold(
       body: SafeArea(
@@ -175,6 +180,8 @@ class _OverviewPageState extends State<OverviewPage> {
                             onAdd: () => _openForm(context),
                             onImport: () => _openImport(context),
                           ),
+                          const SizedBox(height: 14),
+                          PortfolioValueDashboard(summary: valueSummary),
                           const SizedBox(height: 14),
                           HomeActionCenterPanel(
                             actions: homeActions,

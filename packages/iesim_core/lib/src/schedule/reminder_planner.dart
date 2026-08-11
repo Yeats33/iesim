@@ -51,11 +51,10 @@ class ScheduledReminder {
 /// 根据订阅变更一次性计算全部未来通知，不依赖后台轮询。
 class ReminderPlanner {
   ReminderPlanner({
-    required Clock clock,
+    required this._clock,
     List<int> daysBefore = const [7, 3, 1, 0],
     this.localHour = 9,
-  }) : _clock = clock,
-       daysBefore = List.unmodifiable(
+  }) : daysBefore = List.unmodifiable(
          {...daysBefore}.toList()..sort((a, b) => b.compareTo(a)),
        ) {
     if (this.daysBefore.any((days) => days < 0)) {

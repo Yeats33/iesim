@@ -5,6 +5,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app/app_scope.dart';
 import '../app/brand.dart';
 import '../app/theme.dart';
+import '../platform/document_saver.dart';
+import '../services/diagnostic_report_service.dart';
 import '../widgets/app_logo.dart';
 import 'data_exchange_page.dart';
 import 'affiliate_management_page.dart';
@@ -185,6 +187,13 @@ class SettingsPage extends StatelessWidget {
                       title: '高级',
                       children: [
                         _SettingsTile(
+                          icon: Icons.bug_report_outlined,
+                          title: '导出诊断信息',
+                          subtitle: '仅含版本、状态和聚合数量，不含号码或凭据',
+                          onTap: () => _exportDiagnostics(context),
+                        ),
+                        const Divider(indent: 62),
+                        _SettingsTile(
                           icon: Icons.developer_mode_rounded,
                           title: '开发者模式',
                           subtitle: '需密码；清空或生成测试数据',
@@ -302,6 +311,34 @@ class SettingsPage extends StatelessWidget {
 
   static void _open(BuildContext context, Widget page) {
     Navigator.push(context, MaterialPageRoute<void>(builder: (_) => page));
+  }
+
+  static Future<void> _exportDiagnostics(BuildContext context) async {
+    try {
+      final now = DateTime.now().toUtc();
+      final date =
+          '${now.year}${now.month.toString().padLeft(2, '0')}'
+          '${now.day.toString().padLeft(2, '0')}'
+          '-${now.hour.toString().padLeft(2, '0')}'
+          '${now.minute.toString().padLeft(2, '0')}'
+          '${now.second.toString().padLeft(2, '0')}';
+      final saved = await DocumentSaver.saveJson(
+        fileName: 'ieSIM-diagnostics-$date.json',
+        bytes: DiagnosticReportService.build(
+          AppScope.of(context),
+          generatedAtUtc: now,
+        ),
+      );
+      if (!context.mounted || !saved) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('脱敏诊断信息已保存。')));
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('诊断信息导出失败：$error')));
+    }
   }
 
   static Future<void> _openExternal(

@@ -7,6 +7,7 @@ SIM/eSIM 订阅、保号与设备资产管理 Flutter 应用。产品名称为 *
 ## 已实现
 
 - 订阅总览、搜索筛选、详情编辑、充值/通话/短信/续费历史
+- 首页缓存 Profile 聚合、搜索索引与排序投影，筛选输入不重复计算完整资产关系和价值看板
 - Profile 余额管理：设定、增加或减少余额，当前余额与期末流水同事务保存并参与同步
 - Profile AFF 管理：自定义推荐项目、优惠码复制、HTTPS 外链及清晰推广披露；内置 9eSIM、eSTK.me、eSIM.gg、RedteaGO 与 CTExcel UK 推荐
 - Profile 号码绑定管理：记录号码关联的 App、账号用途、验证状态与商店资料；内置 WhatsApp 预设且不读取短信或验证码
@@ -24,6 +25,7 @@ SIM/eSIM 订阅、保号与设备资产管理 Flutter 应用。产品名称为 *
 - Nekoko Tag 独立保存为默认隐藏的外部元数据，以及 Nekoko SQLite 备份的只读导入；用户确认后可提取手机号、标签和日期到 ieSIM 原生字段
 - WebDAV 单快照同步、ETag 乐观锁、订阅与资产的记录级合并、删除墓碑与冲突日志
 - 浅色、深色与跟随系统主题
+- 设置页可导出不含号码、ICCID、EID、激活凭据或远端地址的脱敏诊断 JSON
 
 `packages/iesim_core` 包含可在无图形环境运行的领域、SQLite、互操作与同步逻辑；`app` 是 Flutter Android/iOS 客户端。完成度见 `docs/feature-matrix.md`，设备与运营商预设仓库格式分别见 `docs/device-preset-catalog.md`、`docs/carrier-preset-catalog.md`，设计决策见 `docs/superpowers/specs/2026-08-07-iesim-design.md`。
 
@@ -38,6 +40,8 @@ SIM/eSIM 订阅、保号与设备资产管理 Flutter 应用。产品名称为 *
 - 每个平台的 SHA-256 校验文件
 
 推送与 `pubspec.yaml` 完整版本一致的 Tag（例如 `v0.0.1-bate`）会自动创建或更新 GitHub prerelease，并附加全部产物。Android 未配置密钥时使用开发签名；正式签名可设置 `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS` 和 `ANDROID_KEY_PASSWORD` 四个 Actions Secrets。
+
+Android 构建号使用 GitHub Actions 运行编号并传入所有 APK/AAB 构建，确保后续测试包可以覆盖升级。依赖由 `.github/dependabot.yml` 每周检查；当前升级快照与 Flutter SDK 锁定的传递依赖见 `docs/dependency-audit.md`。
 
 ## 安全边界
 

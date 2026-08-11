@@ -30,19 +30,13 @@ class ProfileCatalogEntry {
       : eumSizes[eumId] ?? referenceSizeBytes;
 
   int? get minimumSizeBytes {
-    final values = <int>[
-      if (referenceSizeBytes != null) referenceSizeBytes!,
-      ...eumSizes.values,
-    ];
+    final values = <int>[?referenceSizeBytes, ...eumSizes.values];
     if (values.isEmpty) return null;
     return values.reduce((a, b) => a < b ? a : b);
   }
 
   int? get maximumSizeBytes {
-    final values = <int>[
-      if (referenceSizeBytes != null) referenceSizeBytes!,
-      ...eumSizes.values,
-    ];
+    final values = <int>[?referenceSizeBytes, ...eumSizes.values];
     if (values.isEmpty) return null;
     return values.reduce((a, b) => a > b ? a : b);
   }

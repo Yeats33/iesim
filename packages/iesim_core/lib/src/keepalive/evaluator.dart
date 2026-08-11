@@ -14,9 +14,9 @@ class KeepAliveEvaluator {
   final int dueSoonThresholdDays;
 
   const KeepAliveEvaluator({
-    required Clock clock,
+    required this._clock,
     this.dueSoonThresholdDays = 7,
-  }) : _clock = clock;
+  });
 
   /// [timeZoneId] 为订阅的 IANA 基准时区标识。
   KeepAliveStatus evaluate(KeepAlive keepAlive, String timeZoneId) {

@@ -28,7 +28,7 @@ jobs:
       version_name: ${{ steps.version.outputs.version_name }}
       build_number: ${{ steps.version.outputs.build_number }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - id: version
         name: Read app/pubspec.yaml
         shell: bash
@@ -65,8 +65,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      - uses: actions/checkout@v7.0.1
+      - uses: subosito/flutter-action@v2.23.0
         with:
           channel: stable
           cache: true
@@ -97,17 +97,17 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@v5.7.0
         with:
           distribution: zulu
           java-version: '17'
           cache: gradle
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4.0.1
       - name: Install Android SDK 37.0
         shell: bash
         run: sdkmanager --channel=3 'platforms;android-37.0' 'build-tools;36.0.0'
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@v2.23.0
         with:
           channel: stable
           cache: true
@@ -149,13 +149,21 @@ jobs:
           } > android/key.properties
       - name: Build universal APK
         working-directory: app
-        run: flutter build apk --release
+        env:
+          BUILD_NUMBER: ${{ needs.meta.outputs.build_number }}
+        run: flutter build apk --release --build-number "$BUILD_NUMBER"
       - name: Build per-ABI APKs
         working-directory: app
-        run: flutter build apk --release --split-per-abi
+        env:
+          BUILD_NUMBER: ${{ needs.meta.outputs.build_number }}
+        run: >-
+          flutter build apk --release --split-per-abi
+          --build-number "$BUILD_NUMBER"
       - name: Build Android App Bundle
         working-directory: app
-        run: flutter build appbundle --release
+        env:
+          BUILD_NUMBER: ${{ needs.meta.outputs.build_number }}
+        run: flutter build appbundle --release --build-number "$BUILD_NUMBER"
       - name: Stage Android artifacts
         working-directory: app
         env:
@@ -176,7 +184,7 @@ jobs:
           cp build/app/outputs/bundle/release/app-release.aab \
             "dist/android/${prefix}-android.aab"
           (cd dist/android && sha256sum ./* > SHA256SUMS-android.txt)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: android-${{ needs.meta.outputs.version_clean }}
           path: app/dist/android/*
@@ -191,8 +199,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      - uses: actions/checkout@v7.0.1
+      - uses: subosito/flutter-action@v2.23.0
         with:
           channel: stable
           cache: true
@@ -226,7 +234,7 @@ jobs:
           output="ieSIM-${VERSION_CLEAN}-ios-unsigned.ipa"
           (cd "$stage" && /usr/bin/zip -qry "$GITHUB_WORKSPACE/app/dist/ios/$output" Payload)
           (cd dist/ios && shasum -a 256 ./*.ipa > SHA256SUMS-ios.txt)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: ios-${{ needs.meta.outputs.version_clean }}
           path: app/dist/ios/*
@@ -241,7 +249,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.1
         with:
           path: dist
           merge-multiple: true

@@ -105,9 +105,9 @@ class KeepAliveEvaluation {
 /// 确认，系统不会仅凭一次动作猜测其发生地点或付费状态。
 class KeepAliveRuleEngine {
   const KeepAliveRuleEngine({
-    required Clock clock,
+    required this._clock,
     this.dueSoonThresholdDays = 7,
-  }) : _clock = clock;
+  });
 
   final Clock _clock;
   final int dueSoonThresholdDays;

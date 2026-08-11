@@ -101,7 +101,8 @@ jobs:
       - uses: actions/setup-java@v5.7.0
         with:
           distribution: zulu
-          java-version: '17'
+          # AGP 9.3 lint uses Java 21 collection APIs at runtime.
+          java-version: '21'
           cache: gradle
       - uses: android-actions/setup-android@v4.0.1
       - name: Install Android SDK 37.0

@@ -1,6 +1,6 @@
 # iesim
 
-ieSIM Flutter 客户端：管理 SIM/eSIM 订阅、保号动作、套餐到期、本地提醒与用户自有 WebDAV 同步。
+ieSIM Flutter 客户端：管理 SIM/eSIM 订阅、保号动作、套餐到期、本地提醒、用户自有 Webhook 与 WebDAV 同步。
 
 ## 本地验证
 
@@ -23,5 +23,6 @@ Android 架构时，才构建不带 `--split-per-abi` 的通用 APK。仓库 CI 
 
 - SQLite 数据库保存在应用私有目录。
 - 通知为本地预排程，不依赖后台常驻。
-- WebDAV 密码通过 Android Keystore 支持的安全存储加密。
-- WebDAV 远端只写入单个 `iesim-v1.json` 快照。
+- WebDAV 密码和 Webhook 地址通过平台安全存储（Android Keystore / iOS Keychain）保护。
+- WebDAV 远端只写入单个 `iesim-v1.encrypted.json` 加密快照。
+- Webhook 只在应用内相关操作成功后发送，不以后台轮询替代本地截止提醒。

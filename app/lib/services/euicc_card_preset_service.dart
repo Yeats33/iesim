@@ -50,7 +50,7 @@ class HttpEuiccCardPresetTransport implements EuiccCardPresetTransport {
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       request.headers.set(
         HttpHeaders.userAgentHeader,
-        'iesim/0.0.1-bate euicc-card-presets',
+        'iesim/0.0.3 euicc-card-presets',
       );
       if (etag != null && etag.isNotEmpty) {
         request.headers.set(HttpHeaders.ifNoneMatchHeader, etag);

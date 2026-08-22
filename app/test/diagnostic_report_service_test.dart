@@ -3,11 +3,17 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:iesim/data/app_controller.dart';
 import 'package:iesim/services/diagnostic_report_service.dart';
+import 'package:iesim/services/webhook_notifications.dart';
 import 'package:iesim_core/iesim_core.dart';
 
 void main() {
   test('诊断报告只导出聚合状态，不泄露 Profile 标识与凭据', () async {
-    final controller = AppController.inMemory();
+    final webhook = MemoryWebhookNotificationGateway()
+      ..configuration = const WebhookConfiguration(
+        endpointUrl: 'https://webhook.private.example/n/SECRET-WEBHOOK-TOKEN',
+        includeProfileDetails: true,
+      );
+    final controller = AppController.inMemory(webhookNotifications: webhook);
     addTearDown(controller.dispose);
     await controller.initialize(defaultTimeZoneId: 'UTC');
     final now = DateTime.utc(2026, 8, 9, 12);
@@ -16,6 +22,8 @@ void main() {
       '8901000000000000000',
       'SECRET-MATCHING-ID',
       'private.operator.example',
+      'SECRET-WEBHOOK-TOKEN',
+      'webhook.private.example',
     ];
     expect(
       await controller.saveSubscription(

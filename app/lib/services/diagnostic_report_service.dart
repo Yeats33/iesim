@@ -41,6 +41,7 @@ abstract final class DiagnosticReportService {
         'busy': controller.busy,
         'hasLocalDataError': controller.errorMessage != null,
         'hasNotificationError': controller.notificationError != null,
+        'hasWebhookError': controller.webhookLastError != null,
       },
       'records': {
         'profiles': subscriptions.length,
@@ -67,6 +68,10 @@ abstract final class DiagnosticReportService {
       'notifications': {
         'enabled': controller.remindersEnabled,
         'permissionGranted': controller.notificationPermissionGranted,
+        'webhookConfigured': controller.webhookConfiguration != null,
+        'webhookEnabled': controller.webhookConfiguration?.enabled ?? false,
+        'webhookProfileDetailsEnabled':
+            controller.webhookConfiguration?.includeProfileDetails ?? false,
       },
       'euiccPresets': {
         'catalogVersion': preset.catalog.catalogVersion,

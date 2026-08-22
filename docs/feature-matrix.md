@@ -1,4 +1,4 @@
-# ieSIM v0.0.1-bate 功能矩阵
+# ieSIM v0.0.3 功能矩阵
 
 | 范围 | 状态 | 说明 |
 |---|---:|---|
@@ -7,6 +7,7 @@
 | AFF 与内置推荐 | 完成 | Profile 可维护推广项目；内置 9eSIM、eSTK.me、eSIM.gg、RedteaGO、CTExcel UK，统一推广披露、复制码与 HTTPS 外链 |
 | Profile 三态生命周期 | 完成 | 已激活（含 enabled/disabled）、未激活与过期博物馆；支持激活期限/要求、手动/删除/导入归档及可配置自动归档 |
 | 四档本地提醒 | 完成 | 与订阅修改同事务重排，开机恢复 |
+| 用户自有 Webhook 通知 | 完成 | HTTPS 地址保存在本机安全存储；支持优先级、标签、自定义 payload、事件开关和隐私详情开关；业务操作不因发送失败而回滚 |
 | Device → Slot → Card → EID → Profile → Subscription | 完成 | 支持库存、内置/可拆 eUICC 和多 EID |
 | GitHub 设备型号预设 | 完成 | schema v1、型号搜索、一键填充、ETag 缓存与 last-known-good 离线回退 |
 | 资产迁移事件 | 完成 | 换机、入库、Profile 迁移与擦除 |
@@ -17,6 +18,6 @@
 | Nekoko nickname 标签 | 完成 | `t:` / `d:` 编解码及转义 |
 | Nekoko SQLite 备份 | 完成 | 只读转换全部 Profile 到 ieSIM 原生模型；名称、标签、运营商、`enabled`、EID/ICCID、类别、GID 与占用空间可落库/同步，导入后回首页标准编辑；不导入敏感 LPA 状态 |
 | WebDAV 订阅 + 资产同步 | 完成 | 开发基线 schema v1，不兼容旧开发快照；ETag/412 重试与 90 天墓碑 |
-| 真实 eSIM 下载/安装/读卡 | 不在本版 | v0.0.1-alpha 是管理和迁移工具，不代替系统 LPA 或 Nekoko 的写卡协议栈 |
+| 真实 eSIM 下载/安装/读卡 | 不在本版 | v0.0.3 是管理和迁移工具，不代替系统 LPA 或 Nekoko 的写卡协议栈 |
 
 真实 SimHub 备份验证只记录聚合数量，测试与文档不输出号码、EID、SM-DP+ 或激活码。

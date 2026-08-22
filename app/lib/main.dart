@@ -15,6 +15,7 @@ import 'pages/subscription_detail_page.dart';
 import 'platform/device_timezone.dart';
 import 'services/euicc_card_preset_service.dart';
 import 'services/reminder_notifications.dart';
+import 'services/webhook_notifications.dart';
 import 'widgets/app_logo.dart';
 
 Future<void> main() async {
@@ -32,6 +33,7 @@ Future<void> main() async {
       showNekokoTags: preferences.showNekokoTags,
       persistShowNekokoTags: preferences.setShowNekokoTags,
       euiccCardPresetService: EuiccCardPresetService(),
+      webhookNotifications: const AppWebhookNotificationService(),
       enableWebDav: true,
     );
     await controller.initialize(

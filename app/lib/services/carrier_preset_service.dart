@@ -49,7 +49,7 @@ class HttpCarrierPresetTransport implements CarrierPresetTransport {
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       request.headers.set(
         HttpHeaders.userAgentHeader,
-        'iesim/0.0.1-bate carrier-presets',
+        'iesim/0.0.3 carrier-presets',
       );
       if (etag != null && etag.isNotEmpty) {
         request.headers.set(HttpHeaders.ifNoneMatchHeader, etag);

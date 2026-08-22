@@ -32,7 +32,7 @@ class HttpProfileCatalogTransport implements ProfileCatalogTransport {
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       request.headers.set(
         HttpHeaders.userAgentHeader,
-        'iesim/0.0.1-bate profile-size-catalog',
+        'iesim/0.0.3 profile-size-catalog',
       );
       if (etag != null && etag.isNotEmpty) {
         request.headers.set(HttpHeaders.ifNoneMatchHeader, etag);

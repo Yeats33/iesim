@@ -11,6 +11,8 @@ import '../services/credential_vault.dart';
 import '../services/euicc_card_preset_service.dart';
 import '../services/home_action_center.dart';
 import '../services/webdav_service.dart';
+import '../services/webhook_notifications.dart';
+import '../util/formatters.dart';
 
 /// 应用层状态：只编排仓库与页面，不复制 core 中的日期和保号规则。
 class AppController extends ChangeNotifier {
@@ -32,6 +34,7 @@ class AppController extends ChangeNotifier {
     required this._credentialVault,
     required this._euiccCardPresetService,
     required this._webDav,
+    required this._webhookNotifications,
     required this._closeStore,
   }) : _subscriptionRepository = subscriptions,
        _activityRepository = activities,
@@ -50,6 +53,8 @@ class AppController extends ChangeNotifier {
     WebDavGateway? webDavGateway,
     ActivationCredentialVault? credentialVault,
     EuiccCardPresetService? euiccCardPresetService,
+    WebhookNotificationGateway webhookNotifications =
+        const NoopWebhookNotificationGateway(),
     bool enableWebDav = false,
   }) {
     final database = openIesimStore(databasePath);
@@ -81,6 +86,7 @@ class AppController extends ChangeNotifier {
           (enableWebDav
               ? AppWebDavService(SyncStore(database), vault)
               : const NoopWebDavGateway()),
+      webhookNotifications: webhookNotifications,
       closeStore: database.close,
     );
   }
@@ -98,6 +104,7 @@ class AppController extends ChangeNotifier {
     WebDavGateway? webDavGateway,
     ActivationCredentialVault? credentialVault,
     EuiccCardPresetService? euiccCardPresetService,
+    WebhookNotificationGateway? webhookNotifications,
   }) => AppController.open(
     ':memory:',
     reminderNotifications: reminderNotifications,
@@ -110,6 +117,8 @@ class AppController extends ChangeNotifier {
     webDavGateway: webDavGateway,
     credentialVault: credentialVault,
     euiccCardPresetService: euiccCardPresetService,
+    webhookNotifications:
+        webhookNotifications ?? MemoryWebhookNotificationGateway(),
   );
 
   final SubscriptionRepository _subscriptionRepository;
@@ -126,6 +135,7 @@ class AppController extends ChangeNotifier {
   final ActivationCredentialVault _credentialVault;
   final EuiccCardPresetService? _euiccCardPresetService;
   final WebDavGateway _webDav;
+  final WebhookNotificationGateway _webhookNotifications;
   final VoidCallback _closeStore;
   final Uuid _uuid = const Uuid();
   final KeepAliveEvaluator _evaluator = const KeepAliveEvaluator(
@@ -163,6 +173,11 @@ class AppController extends ChangeNotifier {
   bool _showNekokoTags;
   bool _notificationPermissionGranted = false;
   String? _notificationError;
+  WebhookConfiguration? _webhookConfiguration;
+  DateTime? _webhookLastSentAtUtc;
+  String? _webhookLastError;
+  int _webhookInFlightCount = 0;
+  bool _disposed = false;
   WebDavConfiguration? _webDavConfiguration;
   SyncRunReport? _lastSyncReport;
   List<SyncConflictLog> _syncConflicts = const [];
@@ -182,6 +197,10 @@ class AppController extends ChangeNotifier {
   bool get showNekokoTags => _showNekokoTags;
   bool get notificationPermissionGranted => _notificationPermissionGranted;
   String? get notificationError => _notificationError;
+  WebhookConfiguration? get webhookConfiguration => _webhookConfiguration;
+  DateTime? get webhookLastSentAtUtc => _webhookLastSentAtUtc;
+  String? get webhookLastError => _webhookLastError;
+  bool get webhookSending => _webhookInFlightCount > 0;
   Stream<String> get notificationSelections =>
       _reminderNotifications.selectedSubscriptionIds;
   WebDavConfiguration? get webDavConfiguration => _webDavConfiguration;
@@ -217,6 +236,11 @@ class AppController extends ChangeNotifier {
       _webDavConfiguration = await _webDav.loadConfiguration();
     } catch (error) {
       _errorMessage = 'WebDAV 凭据读取失败：$error';
+    }
+    try {
+      _webhookConfiguration = await _webhookNotifications.loadConfiguration();
+    } catch (error) {
+      _webhookLastError = 'Webhook 配置读取失败：$error';
     }
     final euiccService = _euiccCardPresetService;
     if (euiccService != null) {
@@ -293,7 +317,19 @@ class AppController extends ChangeNotifier {
       case (_, _, Err(failure: final failure)):
         _errorMessage = _failureMessage(failure);
     }
-    if (automaticallyArchived > 0) await _refreshNotifications();
+    if (automaticallyArchived > 0) {
+      await _refreshNotifications();
+      _queueWebhook(
+        WebhookEventCategory.profile,
+        WebhookNotification(
+          title: 'Profile 已自动归档',
+          message: '已将 $automaticallyArchived 个到期 Profile 移入过期博物馆',
+          event: 'profile.auto_archived',
+          occurredAtUtc: DateTime.now().toUtc(),
+          payload: {'count': automaticallyArchived},
+        ),
+      );
+    }
     notifyListeners();
   }
 
@@ -351,7 +387,8 @@ class AppController extends ChangeNotifier {
       DateTime.now().toUtc().millisecondsSinceEpoch ~/ 300000;
 
   Future<String?> saveSubscription(Subscription subscription) async {
-    return _mutateSubscription(
+    final previous = subscriptionById(subscription.id);
+    final error = await _mutateSubscription(
       subscription,
       () => _subscriptionReminderService.upsert(
         subscription: subscription,
@@ -359,20 +396,23 @@ class AppController extends ChangeNotifier {
       ),
       refreshReminders: true,
     );
+    if (error == null) _queueSubscriptionWebhook(previous, subscription);
+    return error;
   }
 
   /// 原子保存业务 Profile，并将它放入选定卡片的 EID。
   Future<String?> saveSubscriptionAtEid({
     required Subscription subscription,
     required String eidId,
-  }) {
+  }) async {
+    final previous = subscriptionById(subscription.id);
     final existing = assetProfileForSubscription(subscription);
     final placementError = _profilePlacementError(
       eidId,
       iccid: subscription.iccid,
       excludedProfileId: existing?.id,
     );
-    if (placementError != null) return Future.value(placementError);
+    if (placementError != null) return placementError;
     final assetProfile = EsimProfile(
       id: existing?.id ?? _uuid.v4(),
       eidId: eidId,
@@ -384,7 +424,7 @@ class AppController extends ChangeNotifier {
       createdAt: existing?.createdAt ?? subscription.updatedAt,
       updatedAt: subscription.updatedAt,
     );
-    return _mutateSubscription(
+    final error = await _mutateSubscription(
       subscription,
       () => _subscriptionReminderService.upsert(
         subscription: subscription,
@@ -394,6 +434,8 @@ class AppController extends ChangeNotifier {
       ),
       refreshReminders: true,
     );
+    if (error == null) _queueSubscriptionWebhook(previous, subscription);
+    return error;
   }
 
   /// 删除已激活/待激活 Profile 时先移入博物馆；博物馆内才执行永久删除。
@@ -407,6 +449,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<String?> deleteSubscriptionPermanently(String id) async {
+    final subscription = subscriptionById(id);
     final now = DateTime.now().toUtc();
     final error = await _mutate(
       () => _deletionService.delete(subscriptionId: id, nowUtc: now),
@@ -421,6 +464,17 @@ class AppController extends ChangeNotifier {
           activation: null,
         ),
       );
+      if (subscription != null) {
+        _queueWebhook(
+          WebhookEventCategory.profile,
+          _subscriptionWebhook(
+            subscription,
+            title: 'Profile 已永久删除',
+            event: 'profile.deleted',
+            occurredAtUtc: now,
+          ),
+        );
+      }
       return null;
     } catch (error) {
       return 'Profile 已删除，但凭据墓碑保存失败：$error';
@@ -807,6 +861,10 @@ class AppController extends ChangeNotifier {
     await reload();
     await _refreshNotifications();
     _setBusy(false);
+    _queueWebhook(
+      WebhookEventCategory.activity,
+      _activityWebhook(subscription, record),
+    );
     return null;
   }
 
@@ -848,6 +906,10 @@ class AppController extends ChangeNotifier {
     await reload();
     await _refreshNotifications();
     _setBusy(false);
+    _queueWebhook(
+      WebhookEventCategory.activity,
+      _activityWebhook(subscription, record),
+    );
     return null;
   }
 
@@ -1060,6 +1122,206 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  Future<String?> testWebhook(WebhookConfiguration configuration) async {
+    if (_webhookInFlightCount > 0) return 'Webhook 请求尚未完成，请稍候';
+    try {
+      configuration.validate();
+    } on FormatException catch (error) {
+      return error.message;
+    }
+    _webhookInFlightCount++;
+    _webhookLastError = null;
+    notifyListeners();
+    try {
+      await _webhookNotifications.send(
+        configuration,
+        WebhookNotification(
+          title: 'Webhook 测试成功',
+          message: 'ieSIM 已成功连接到你配置的 Webhook 服务',
+          event: 'webhook.test',
+          occurredAtUtc: DateTime.now().toUtc(),
+          payload: const {'source': 'settings'},
+        ),
+      );
+      _webhookLastSentAtUtc = DateTime.now().toUtc();
+      return null;
+    } catch (error) {
+      final message = _webhookErrorMessage(error);
+      _webhookLastError = message;
+      return message;
+    } finally {
+      _webhookInFlightCount--;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<String?> saveWebhookConfiguration(
+    WebhookConfiguration configuration,
+  ) async {
+    try {
+      configuration.validate();
+      await _webhookNotifications.saveConfiguration(configuration);
+      _webhookConfiguration = configuration;
+      _webhookLastError = null;
+      notifyListeners();
+      return null;
+    } on FormatException catch (error) {
+      return error.message;
+    } catch (error) {
+      return 'Webhook 配置保存失败：$error';
+    }
+  }
+
+  Future<String?> disconnectWebhook() async {
+    try {
+      await _webhookNotifications.clearConfiguration();
+      _webhookConfiguration = null;
+      _webhookLastError = null;
+      _webhookLastSentAtUtc = null;
+      notifyListeners();
+      return null;
+    } catch (error) {
+      return 'Webhook 配置移除失败：$error';
+    }
+  }
+
+  void _queueSubscriptionWebhook(
+    Subscription? previous,
+    Subscription subscription,
+  ) {
+    final stage = subscription.lifecycle.stage;
+    final (title, event) = switch ((previous?.lifecycle.stage, stage)) {
+      (null, _) => ('Profile 已添加', 'profile.created'),
+      (ProfileStage.pendingActivation, ProfileStage.active) => (
+        'Profile 已激活',
+        'profile.activated',
+      ),
+      (_, ProfileStage.museum) when previous?.lifecycle.stage != stage => (
+        'Profile 已归档',
+        'profile.archived',
+      ),
+      (ProfileStage.museum, ProfileStage.active) => (
+        'Profile 已恢复',
+        'profile.restored',
+      ),
+      _ => ('Profile 已更新', 'profile.updated'),
+    };
+    _queueWebhook(
+      WebhookEventCategory.profile,
+      _subscriptionWebhook(
+        subscription,
+        title: title,
+        event: event,
+        occurredAtUtc: subscription.updatedAt,
+      ),
+    );
+  }
+
+  WebhookNotification _subscriptionWebhook(
+    Subscription subscription, {
+    required String title,
+    required String event,
+    required DateTime occurredAtUtc,
+  }) {
+    final includeDetails =
+        _webhookConfiguration?.includeProfileDetails ?? false;
+    final details = <String, Object?>{};
+    if (includeDetails) {
+      details.addAll({
+        'subscriptionId': subscription.id,
+        'profileName': profileDisplayName(subscription),
+        'phoneNumber': subscription.number.isUnknown
+            ? null
+            : subscription.number.value,
+        'operator': subscription.operator,
+      });
+    }
+    return WebhookNotification(
+      title: title,
+      message: includeDetails
+          ? '${displayProfileIdentity(subscription)}：$title'
+          : title,
+      event: event,
+      occurredAtUtc: occurredAtUtc.toUtc(),
+      payload: {
+        'stage': subscription.lifecycle.stage.name,
+        'deviceState': subscription.lifecycle.deviceState.name,
+        ...details,
+      },
+    );
+  }
+
+  WebhookNotification _activityWebhook(
+    Subscription subscription,
+    ActivityRecord record,
+  ) {
+    final includeDetails =
+        _webhookConfiguration?.includeProfileDetails ?? false;
+    final action = activityName(record.type);
+    return WebhookNotification(
+      title: '$action已记录',
+      message: includeDetails
+          ? '${displayProfileIdentity(subscription)}：$action已记录'
+          : '一个 Profile 的$action已记录',
+      event: record.type == ActivityType.balanceChange
+          ? 'activity.balance_changed'
+          : 'activity.recorded',
+      occurredAtUtc: record.occurredAt,
+      payload: {
+        'activityType': record.type.name,
+        if (record.amount case final amount?) ...{
+          'amountMinorUnits': amount.minorUnits,
+          'currencyCode': amount.currencyCode,
+        },
+        if (record.balanceAfter case final balance?) ...{
+          'balanceMinorUnits': balance.minorUnits,
+          'balanceCurrencyCode': balance.currencyCode,
+        },
+        if (includeDetails) ...{
+          'subscriptionId': subscription.id,
+          'profileName': profileDisplayName(subscription),
+          'phoneNumber': subscription.number.isUnknown
+              ? null
+              : subscription.number.value,
+          'operator': subscription.operator,
+        },
+      },
+    );
+  }
+
+  void _queueWebhook(
+    WebhookEventCategory category,
+    WebhookNotification notification,
+  ) {
+    final configuration = _webhookConfiguration;
+    if (configuration == null || !configuration.allows(category)) return;
+    unawaited(_deliverWebhook(configuration, notification));
+  }
+
+  Future<void> _deliverWebhook(
+    WebhookConfiguration configuration,
+    WebhookNotification notification,
+  ) async {
+    _webhookInFlightCount++;
+    if (!_disposed) notifyListeners();
+    try {
+      await _webhookNotifications.send(configuration, notification);
+      _webhookLastSentAtUtc = DateTime.now().toUtc();
+      _webhookLastError = null;
+    } catch (error) {
+      _webhookLastError = _webhookErrorMessage(error);
+    } finally {
+      _webhookInFlightCount--;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  static String _webhookErrorMessage(Object error) => switch (error) {
+    FormatException(message: final message) => message,
+    WebhookHttpException() || WebhookNetworkException() => error.toString(),
+    _ => 'Webhook 发送失败：$error',
+  };
+
   Future<String?> testWebDav(WebDavConfiguration configuration) async {
     if (_busy) return '当前操作尚未完成，请稍候';
     _setBusy(true);
@@ -1103,11 +1365,49 @@ class AppController extends ChangeNotifier {
           _loadSyncConflicts();
           _loadSyncState();
           await _refreshNotifications();
+          _queueWebhook(
+            WebhookEventCategory.sync,
+            WebhookNotification(
+              title: 'WebDAV 同步完成',
+              message: report.conflictCount == 0
+                  ? '数据已安全同步到 WebDAV'
+                  : '数据已同步，并记录 ${report.conflictCount} 个冲突',
+              event: 'sync.succeeded',
+              occurredAtUtc: report.syncedAtUtc,
+              payload: {
+                'subscriptionCount': report.subscriptionCount,
+                'activityCount': report.activityCount,
+                'conflictCount': report.conflictCount,
+                'attempts': report.attempts,
+              },
+            ),
+          );
           return null;
         case Err(failure: final failure):
-          return _failureMessage(failure);
+          final message = _failureMessage(failure);
+          _queueWebhook(
+            WebhookEventCategory.sync,
+            WebhookNotification(
+              title: 'WebDAV 同步失败',
+              message: message,
+              event: 'sync.failed',
+              occurredAtUtc: DateTime.now().toUtc(),
+              payload: {'failureType': failure.runtimeType.toString()},
+            ),
+          );
+          return message;
       }
     } catch (error) {
+      _queueWebhook(
+        WebhookEventCategory.sync,
+        WebhookNotification(
+          title: 'WebDAV 同步失败',
+          message: '同步过程中发生未预期错误',
+          event: 'sync.failed',
+          occurredAtUtc: DateTime.now().toUtc(),
+          payload: {'failureType': error.runtimeType.toString()},
+        ),
+      );
       return '同步失败：$error';
     } finally {
       _setBusy(false);
@@ -1177,6 +1477,7 @@ class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _reminderNotifications.dispose();
     _closeStore();
     super.dispose();

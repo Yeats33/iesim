@@ -49,7 +49,7 @@ class HttpAppBindingPresetTransport implements AppBindingPresetTransport {
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       request.headers.set(
         HttpHeaders.userAgentHeader,
-        'iesim/0.0.1-bate app-binding-presets',
+        'iesim/0.0.3 app-binding-presets',
       );
       if (etag != null && etag.isNotEmpty) {
         request.headers.set(HttpHeaders.ifNoneMatchHeader, etag);

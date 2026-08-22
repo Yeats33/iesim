@@ -468,7 +468,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('设置页可进入 WebDAV 与本地通知完整配置页', (tester) async {
+  testWidgets('设置页可进入 WebDAV、本地通知与 Webhook 配置页', (tester) async {
     final controller = AppController.inMemory();
     await controller.initialize(defaultTimeZoneId: 'Asia/Shanghai');
     await tester.pumpWidget(IesimApp(controller: controller));
@@ -494,6 +494,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('提醒节奏'), findsOneWidget);
     expect(find.text('可靠性与隐私'), findsOneWidget);
+
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    final webhook = find.text('Webhook 通知');
+    await tester.ensureVisible(webhook);
+    await tester.tap(webhook);
+    await tester.pumpAndSettle();
+    expect(find.text('连接 Webhook'), findsOneWidget);
+    expect(find.text('发送事件'), findsOneWidget);
+    expect(find.text('隐私与运行方式'), findsOneWidget);
+    expect(find.text('HTTPS Webhook 地址'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -533,7 +544,10 @@ void main() {
     await tester.pumpAndSettle();
     final recommendations = find.text('优惠与推荐');
     await tester.ensureVisible(recommendations);
-    await tester.tap(recommendations);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.ancestor(of: recommendations, matching: find.byType(ListTile)),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('推广 / 推荐披露'), findsOneWidget);

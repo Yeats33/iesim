@@ -15,6 +15,7 @@ import 'nekoko_tags_page.dart';
 import 'notification_settings_page.dart';
 import 'profile_lifecycle_settings_page.dart';
 import 'webdav_page.dart';
+import 'webhook_settings_page.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({
@@ -154,6 +155,23 @@ class SettingsPage extends StatelessWidget {
                               : '需开启',
                           onTap: () =>
                               _open(context, const NotificationSettingsPage()),
+                        ),
+                        const Divider(indent: 62),
+                        _SettingsTile(
+                          icon: Icons.webhook_rounded,
+                          title: 'Webhook 通知',
+                          subtitle: '将应用事件发送到你自己的 HTTPS 服务',
+                          badge: controller.webhookLastError != null
+                              ? '发送失败'
+                              : switch (controller.webhookConfiguration) {
+                                  null => '未配置',
+                                  final configuration
+                                      when configuration.enabled =>
+                                    '已启用',
+                                  _ => '已暂停',
+                                },
+                          onTap: () =>
+                              _open(context, const WebhookSettingsPage()),
                         ),
                       ],
                     ),

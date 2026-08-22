@@ -51,7 +51,7 @@ class HttpAppleAppStoreLookupTransport implements AppleAppStoreLookupTransport {
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       request.headers.set(
         HttpHeaders.userAgentHeader,
-        'iesim/0.0.1-bate apple-app-lookup',
+        'iesim/0.0.3 apple-app-lookup',
       );
       final response = await request.close().timeout(
         const Duration(seconds: 12),

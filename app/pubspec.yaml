@@ -35,7 +35,7 @@ dependencies:
   flutter_local_notifications: ^22.3.0
   flutter_localizations:
     sdk: flutter
-  flutter_secure_storage: ^11.0.0
+  flutter_secure_storage: ^11.1.1
   iesim_core:
     path: ../packages/iesim_core
   # flutter_localizations in Flutter 3.44.9 pins intl to 0.20.2.

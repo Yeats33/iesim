@@ -189,7 +189,7 @@ jobs:
           cp build/app/outputs/bundle/release/app-release.aab \
             "dist/android/${prefix}-bundle.aab"
           (cd dist/android && sha256sum ./* > SHA256SUMS-android.txt)
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: android-${{ env.PACKAGE_ID }}-v${{ needs.meta.outputs.version_clean }}
           path: app/dist/android/*
@@ -239,7 +239,7 @@ jobs:
           output="ieSIM-v${VERSION_CLEAN}-ios-unsigned.ipa"
           (cd "$stage" && /usr/bin/zip -qry "$GITHUB_WORKSPACE/app/dist/ios/$output" Payload)
           (cd dist/ios && shasum -a 256 ./*.ipa > SHA256SUMS-ios.txt)
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: ios-${{ needs.meta.outputs.version_clean }}
           path: app/dist/ios/*
